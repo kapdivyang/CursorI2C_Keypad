@@ -120,17 +120,17 @@ static parameter_t parameters[] = {
     // B Off Time parameter
     {.name = "17.B OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_17, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // Back Set parameter
-    {.name = "18.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_NONE, .min_value = 0, .max_value = 9, .decimal_places = 0, .allow_negative = false}},
+    {.name = "18.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
     // Back Rise parameter
-    {.name = "19.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_NONE, .min_value = 0, .max_value = 9, .decimal_places = 0, .allow_negative = false}},
+    {.name = "19.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
     // January Dusk parameter
-    {.name = "20.JanDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "20.JanDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // January Dawn parameter
-    {.name = "21.JanDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "21.JanDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // December Dusk parameter
-    {.name = "22.DecDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "22.DecDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // December Dawn parameter
-    {.name = "23.DecDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "23.DecDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // Password parameter
     {.name = "24.Password:", .type = PARAM_TYPE_PASSWORD, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_24, .value = NULL, .default_value = "00000000", .validate = validate_password, .validation = {.min_length = 8, .max_length = 8, .format = FORMAT_NONE, .min_value = 0, .max_value = 0, .decimal_places = 0, .allow_negative = false, .max_retries = 3, .lockout_time = 15}},
     // Password Enable/Disable parameter
@@ -468,10 +468,41 @@ void validate_time(void *value)
 
 void validate_number(void *value)
 {
-    char *num = (char *)value;
-    int val = atoi(num);
-    if (val < 0)
-        strcpy(num, "0");
+    char *num_str = (char *)value;
+    if (!num_str)
+        return;
+
+    // Reset validation status
+    validation_failed = false;
+    validation_error_message[0] = '\0';
+
+    // Find the parameter this value belongs to
+    parameter_t *param = NULL;
+    for (int i = 0; i < NUM_PARAMETERS; i++)
+    {
+        if (parameters[i].value == value)
+        {
+            param = &parameters[i];
+            break;
+        }
+    }
+    
+    if (!param)
+        return;
+
+    int val = atoi(num_str);
+    
+    // Check range based on parameter validation rules
+    if (val < param->validation.min_value || val > param->validation.max_value)
+    {
+        // Set validation error
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Range %d to %d", (int)param->validation.min_value, (int)param->validation.max_value);
+                
+        // Reset to default value
+        strcpy(num_str, param->default_value);
+    }
 }
 
 // Modified validate_enable_disable to show "Enable"/"Disable" instead of 0/1
@@ -2019,7 +2050,7 @@ void keyboard_task(void *pvParameters)
                                 lcd_cursor_blink(true);
                             }
                         }
-                        else if (key == '*') // Decimal point for decimal parameters
+                        else if (key == '*') // Decimal point or negative sign
                         {
                             if (parameters[param_idx].validation.format == FORMAT_DECIMAL)
                             {
@@ -2065,6 +2096,66 @@ void keyboard_task(void *pvParameters)
                                     lcd_set_cursor(1, 5 + input_pos); // "Val: " is 5 characters
                                     lcd_cursor_show(true);
                                     lcd_cursor_blink(true);
+                                }
+                            }
+                            else if (parameters[param_idx].validation.allow_negative)
+                            {
+                                // For parameters that allow negative values, use '*' as a sign toggle
+                                
+                                // If no input yet, start with a minus sign
+                                if (input_pos == 0)
+                                {
+                                    // Clear the display first
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Val:                "); // Clear the entire line
+                                    
+                                    input[input_pos++] = '-';
+                                    input[input_pos] = '\0';
+                                    
+                                    // Display the minus sign
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Val: -");
+                                    lcd_set_cursor(1, 6); // Position after the minus
+                                    lcd_cursor_show(true);
+                                    lcd_cursor_blink(true);
+                                }
+                                else if (input_pos > 0)
+                                {
+                                    // Toggle the sign if there's already input
+                                    if (input[0] == '-')
+                                    {
+                                        // Remove the minus sign
+                                        for (int i = 0; i < input_pos; i++)
+                                        {
+                                            input[i] = input[i+1];
+                                        }
+                                        input_pos--;
+                                        
+                                        // Update display
+                                        lcd_set_cursor(1, 0);
+                                        lcd_print("Val:                "); // Clear line
+                                        lcd_set_cursor(1, 0);
+                                        lcd_print("Val: %s", input);
+                                        lcd_set_cursor(1, 5 + input_pos);
+                                    }
+                                    else
+                                    {
+                                        // Add minus sign at the beginning
+                                        for (int i = input_pos; i > 0; i--)
+                                        {
+                                            input[i] = input[i-1];
+                                        }
+                                        input[0] = '-';
+                                        input_pos++;
+                                        input[input_pos] = '\0';
+                                        
+                                        // Update display
+                                        lcd_set_cursor(1, 0);
+                                        lcd_print("Val:                "); // Clear line
+                                        lcd_set_cursor(1, 0);
+                                        lcd_print("Val: %s", input);
+                                        lcd_set_cursor(1, 5 + input_pos);
+                                    }
                                 }
                             }
                         }
