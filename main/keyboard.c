@@ -1582,6 +1582,39 @@ static void refresh_rtc_time(void)
     }
 }
 
+// Comment out unused category-related code for now
+/*
+// Add category definitions
+typedef enum {
+    CAT_TIME_DATE,
+    CAT_SYSTEM,
+    CAT_PROTECTION,
+    CAT_STAGGERING,
+    CAT_TWILIGHT,
+    NUM_CATEGORIES
+} param_category_t;
+
+// Add category info
+const char* category_names[NUM_CATEGORIES] = {
+    "TIME & DATE",
+    "SYSTEM SETUP",
+    "PROTECTION",
+    "STAGGERING",
+    "TWILIGHT"
+};
+
+// Assign categories to parameters
+param_category_t param_categories[NUM_PARAMETERS] = {
+    CAT_TIME_DATE,  // 01.Time
+    CAT_TIME_DATE,  // 02.Date
+    CAT_SYSTEM,     // 03.HiVolt
+    // etc.
+};
+
+// Add category navigation in keyboard_task:
+static param_category_t current_category = CAT_TIME_DATE;
+*/
+
 void keyboard_task(void *pvParameters)
 {
     load_all_parameters();
@@ -1596,6 +1629,9 @@ void keyboard_task(void *pvParameters)
 
     // This variable is used throughout the function to track semaphore state
     volatile bool semaphore_taken __attribute__((unused)) = false;
+
+    // Create a single shared buffer:
+    static char shared_buffer[128];
 
     while (1)
     {
@@ -1696,9 +1732,7 @@ void keyboard_task(void *pvParameters)
                     if (strstr(parameters[i].name, "PassED") != NULL)
                     {
                         // Check if password is enabled (value is "1" or "Enable")
-                        if (parameters[i].value != NULL &&
-                            (strcmp(parameters[i].value, "1") == 0 ||
-                             strcmp(parameters[i].value, "Enable") == 0))
+                        if (((char*)parameters[i].value)[0] == '1' && ((char*)parameters[i].value)[1] == '\0')
                         {
                             password_enabled = true;
                         }
@@ -1742,12 +1776,11 @@ void keyboard_task(void *pvParameters)
                         // Format and display the current value
                         if (parameters[param_idx].value != NULL)
                         {
-                            char formatted_output[32] = {0};
                             format_input_according_to_rules(
                                 (char *)parameters[param_idx].value,
-                                formatted_output,
+                                shared_buffer,
                                 &parameters[param_idx].validation);
-                            lcd_print("Val: %s", formatted_output);
+                            lcd_print("Val: %s", shared_buffer);
                             
                             // Don't show cursor yet as we're not editing
                             lcd_cursor_show(false);
@@ -1845,12 +1878,11 @@ void keyboard_task(void *pvParameters)
                                 // Format and display current value
                                 if (parameters[param_idx].value != NULL)
                                 {
-                                    char formatted_output[32] = {0};
                                     format_input_according_to_rules(
                                         (char *)parameters[param_idx].value,
-                                        formatted_output,
+                                        shared_buffer,
                                         &parameters[param_idx].validation);
-                                    lcd_print("Val: %s", formatted_output);
+                                    lcd_print("Val: %s", shared_buffer);
                                 }
                                 else
                                 {
@@ -1952,12 +1984,11 @@ void keyboard_task(void *pvParameters)
                             // Format and display current value
                             if (parameters[param_idx].value != NULL)
                             {
-                                char formatted_output[32] = {0};
                                 format_input_according_to_rules(
                                     (char *)parameters[param_idx].value, 
-                                    formatted_output,
+                                    shared_buffer,
                                     &parameters[param_idx].validation);
-                                lcd_print("Val: %s", formatted_output);
+                                lcd_print("Val: %s", shared_buffer);
                             }
                             else
                             {
@@ -1990,12 +2021,11 @@ void keyboard_task(void *pvParameters)
                             // Format and display current value
                             if (parameters[param_idx].value != NULL)
                             {
-                                char formatted_output[32] = {0};
                                 format_input_according_to_rules(
                                     (char *)parameters[param_idx].value, 
-                                    formatted_output,
+                                    shared_buffer,
                                     &parameters[param_idx].validation);
-                                lcd_print("Val: %s", formatted_output);
+                                lcd_print("Val: %s", shared_buffer);
                             }
                             else
                             {
@@ -2016,16 +2046,13 @@ void keyboard_task(void *pvParameters)
                                 input[--input_pos] = '\0';
                                 
                                 // Update display
-                                char formatted_output[32] = {0};
-                                if (input_pos > 0) {
-                                    format_input_according_to_rules(
-                                        input, 
-                                        formatted_output,
-                                        &parameters[param_idx].validation);
-                                }
+                                format_input_according_to_rules(
+                                    input, 
+                                    shared_buffer,
+                                    &parameters[param_idx].validation);
                                 
                                 lcd_set_cursor(1, 0);
-                                lcd_print("Val: %s ", formatted_output); // Space to clear last character
+                                lcd_print("Val: %s ", shared_buffer); // Space to clear last character
                                 
                                 // Set cursor position for editing
                                 int cursor_pos = 5; // "Val: " is 5 characters
@@ -2083,14 +2110,13 @@ void keyboard_task(void *pvParameters)
                                     input[input_pos] = '\0';
                                     
                                     // Update display
-                                    char formatted_output[32] = {0};
                                     format_input_according_to_rules(
                                         input, 
-                                        formatted_output,
+                                        shared_buffer,
                                         &parameters[param_idx].validation);
                                     
                                     lcd_set_cursor(1, 0);
-                                    lcd_print("Val: %s", formatted_output);
+                                    lcd_print("Val: %s", shared_buffer);
                                     
                                     // Set cursor position for editing
                                     lcd_set_cursor(1, 5 + input_pos); // "Val: " is 5 characters
@@ -2179,14 +2205,13 @@ void keyboard_task(void *pvParameters)
                                 input[input_pos] = '\0';
                                 
                                 // Format and display input
-                                char formatted_output[32] = {0};
                                 format_input_according_to_rules(
                                     input, 
-                                    formatted_output,
+                                    shared_buffer,
                                     &parameters[param_idx].validation);
                                 
                                 lcd_set_cursor(1, 0);
-                                lcd_print("Val: %s", formatted_output);
+                                lcd_print("Val: %s", shared_buffer);
                                 
                                 // Set cursor position for editing based on format type
                                 int cursor_pos = 5; // "Val: " is 5 characters
@@ -2266,12 +2291,11 @@ void keyboard_task(void *pvParameters)
                                     lcd_set_cursor(1, 0);
                                     
                                     // Format and display the current (corrected) value
-                                    char formatted_output[32] = {0};
                                     format_input_according_to_rules(
                                         (char *)parameters[param_idx].value, 
-                                        formatted_output,
+                                        shared_buffer,
                                         &parameters[param_idx].validation);
-                                    lcd_print("Val: %s", formatted_output);
+                                    lcd_print("Val: %s", shared_buffer);
                                 }
                                 else
                                 {
@@ -2279,10 +2303,9 @@ void keyboard_task(void *pvParameters)
                                     store_parameter(param_idx);
                                     
                                     // Format and display the updated value
-                                    char formatted_output[32] = {0};
                                     format_input_according_to_rules(
                                         (char *)parameters[param_idx].value, 
-                                        formatted_output,
+                                        shared_buffer,
                                         &parameters[param_idx].validation);
                                     
                                     // Show confirmation
@@ -2290,7 +2313,7 @@ void keyboard_task(void *pvParameters)
                                     lcd_set_cursor(0, 0);
                                     lcd_print("Value saved!");
                                     lcd_set_cursor(1, 0);
-                                    lcd_print("%s", formatted_output);
+                                    lcd_print("%s", shared_buffer);
                                     vTaskDelay(1000 / portTICK_PERIOD_MS);
                                     
                                     // Show parameter again
@@ -2298,7 +2321,7 @@ void keyboard_task(void *pvParameters)
                                     lcd_set_cursor(0, 0);
                                     lcd_print("%s", parameters[param_idx].name);
                                     lcd_set_cursor(1, 0);
-                                    lcd_print("Val: %s", formatted_output);
+                                    lcd_print("Val: %s", shared_buffer);
                                     
                                     // After saving time, refresh the RTC value
                                     if (was_time_param)
