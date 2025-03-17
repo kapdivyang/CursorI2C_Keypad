@@ -104,7 +104,7 @@ static parameter_t parameters[] = {
     // Alarm parameter
     {.name = "09.Alarm:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_9, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
     // Protection parameter
-    {.name = "10.Protect:", .type = PARAM_TYPE_MULTIPLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_10, .value = NULL, .default_value = "0", .validate = validate_multiple, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_NONE, .min_value = 0, .max_value = 3, .decimal_places = 0, .allow_negative = false}},
+    {.name = "10.Protect:", .type = PARAM_TYPE_MULTIPLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_10, .value = NULL, .default_value = "0", .validate = validate_multiple, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_MULTIPLE, .min_value = 0, .max_value = 3, .decimal_places = 0, .allow_negative = false}},
     // Rotate parameter
     {.name = "11.Rotate:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_11, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
     // R On Time parameter
@@ -2395,6 +2395,20 @@ static void format_input_according_to_rules(const char *input, char *output, con
                 strcpy(output, input);
             break;
 
+        case FORMAT_MULTIPLE:
+            // Format for multiple choice parameters
+            if (strcmp(input, "0") == 0)
+                strcpy(output, "ALL");
+            else if (strcmp(input, "1") == 0)
+                strcpy(output, "Volt");
+            else if (strcmp(input, "2") == 0)
+                strcpy(output, "Curr");
+            else if (strcmp(input, "3") == 0)
+                strcpy(output, "None");
+            else
+                strcpy(output, input); // Keep original for unknown values
+            break;
+
         case FORMAT_DATE:
             if (strlen(input) > 0)
             {
@@ -2422,11 +2436,6 @@ static void format_input_according_to_rules(const char *input, char *output, con
 
         case FORMAT_DECIMAL:
             // This is handled by validate_decimal
-            strcpy(output, input);
-            break;
-
-        case FORMAT_MULTIPLE:
-            // This is for parameters with multiple options
             strcpy(output, input);
             break;
 
