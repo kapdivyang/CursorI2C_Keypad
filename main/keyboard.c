@@ -173,6 +173,10 @@ static bool is_authenticated = false;
 // static bool cursor_visible = true;
 // static const TickType_t CURSOR_BLINK_INTERVAL_MS = 500; // Blink every 500ms
 
+// Add a global flag to track validation status
+static bool validation_failed = false;
+static char validation_error_message[64] = {0};
+
 // This new function will handle the validation logic
 static bool is_valid_date(const char *date_str)
 {
@@ -226,50 +230,85 @@ static bool is_valid_date(const char *date_str)
 // This matches the declaration in keyboard.h
 void validate_date(void *value)
 {
-    char *date = (char *)value;
+    char *date_str = (char *)value;
+    if (!date_str)
+        return;
 
-    // When editing or viewing parameter: only validate when we have all 6 digits
-    if (strlen(date) != 6)
+    // Reset validation status
+    validation_failed = false;
+    validation_error_message[0] = '\0';
+
+    // Special case for empty value
+    if (strlen(date_str) == 0)
     {
-        // Don't change the value when it's incomplete
+        strcpy(date_str, "010123"); // Default to 01/01/23
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Empty date - using default");
         return;
     }
 
-    // Extract day, month, year from DDMMYY format
-    int day = (date[0] - '0') * 10 + (date[1] - '0');
-    int month = (date[2] - '0') * 10 + (date[3] - '0');
-    int year = (date[4] - '0') * 10 + (date[5] - '0');
-
-    // Validate ranges
-    if (month < 1 || month > 12 || day < 1 || day > 31 || year < 0 || year > 99)
+    // If not in DDMMYY format, assume raw input and try to parse it
+    if (!is_valid_date(date_str))
     {
-        strcpy(date, "010123");
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Invalid date format");
+                
+        // Reset to default (01/01/23)
+        strcpy(date_str, "010123");
         return;
     }
 
-    // Additional validation for days in month
-    int max_days = 31;
-    if (month == 4 || month == 6 || month == 9 || month == 11)
+    // The date is valid, extract and check parts
+    char day_str[3] = {date_str[0], date_str[1], '\0'};
+    char month_str[3] = {date_str[2], date_str[3], '\0'};
+    char year_str[3] = {date_str[4], date_str[5], '\0'};
+
+    int day = atoi(day_str);
+    int month = atoi(month_str);
+    int year = atoi(year_str);
+
+    // Additional validation for day/month ranges
+    if (month < 1 || month > 12 || day < 1 || day > 31)
     {
-        max_days = 30;
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Day/month out of range");
+                
+        // Reset to default (01/01/23)
+        strcpy(date_str, "010123");
+        return;
+    }
+
+    // Specific month validation
+    if ((month == 4 || month == 6 || month == 9 || month == 11) && day > 30)
+    {
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Month %d has 30 days max", month);
+                
+        // Reset to default (01/01/23)
+        strcpy(date_str, "010123");
+        return;
     }
     else if (month == 2)
     {
-        // Simple leap year check
-        if ((year % 4) == 0)
+        // February validation with leap year check
+        bool leap_year = (year % 4 == 0); // Simplified leap year check
+        if ((leap_year && day > 29) || (!leap_year && day > 28))
         {
-            max_days = 29;
-        }
-        else
-        {
-            max_days = 28;
+            validation_failed = true;
+            snprintf(validation_error_message, sizeof(validation_error_message), 
+                    "Feb has %d days in 20%02d", leap_year ? 29 : 28, year);
+                    
+            // Reset to default (01/01/23)
+            strcpy(date_str, "010123");
+            return;
         }
     }
 
-    if (day > max_days)
-    {
-        strcpy(date, "010123");
-    }
+    // Date is valid, keep the original format
 }
 
 void format_date(const char *input, char *output, size_t output_size)
@@ -386,46 +425,43 @@ void format_time(char *input, char *output)
 void validate_time(void *value)
 {
     char *time_str = (char *)value;
-    int hour = 0, minute = 0;
+    if (!time_str)
+        return;
 
-    // Check if time is in HH:MM format
+    // Reset validation status
+    validation_failed = false;
+    validation_error_message[0] = '\0';
+
+    int hour = 0, minute = 0;
+    bool valid_format = false;
+
+    // Check for HH:MM format
     if (strlen(time_str) == 5 && time_str[2] == ':')
     {
-        if (sscanf(time_str, "%d:%d", &hour, &minute) != 2 ||
-            hour < 0 || hour > 23 || minute < 0 || minute > 59)
+        if (sscanf(time_str, "%d:%d", &hour, &minute) == 2)
         {
-            strcpy(time_str, "00:00");
+            valid_format = true;
         }
-        // else the time is already valid
     }
-    // Check if time is in HHMM format
+    // Check for HHMM format
     else if (strlen(time_str) == 4)
     {
-        // Extract hours and minutes directly
         char hours[3] = {time_str[0], time_str[1], '\0'};
         char mins[3] = {time_str[2], time_str[3], '\0'};
 
         hour = atoi(hours);
         minute = atoi(mins);
+        valid_format = true;
+    }
 
-        if (hour < 0 || hour > 23 || minute < 0 || minute > 59)
-        {
-            strcpy(time_str, "00:00");
-        }
-        else
-        {
-            // Format to HH:MM for storage
-            sprintf(time_str, "%02d:%02d", hour, minute);
-        }
-    }
-    // Partial input - we'll validate on submission
-    else if (strlen(time_str) < 4)
+    if (!valid_format || hour < 0 || hour > 23 || minute < 0 || minute > 59)
     {
-        // Don't change the value when it's incomplete
-        return;
-    }
-    else
-    {
+        // Set validation error flag and message
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Invalid time format");
+        
+        // Reset to default
         strcpy(time_str, "00:00");
     }
 }
@@ -1459,6 +1495,62 @@ esp_err_t keypad_init(i2c_port_t i2c_port)
     return ESP_OK;
 }
 
+// Add a refresh_rtc_time function
+static void refresh_rtc_time(void)
+{
+    // Find the time parameter index
+    int time_param_idx = -1;
+    for (int i = 0; i < NUM_PARAMETERS; i++)
+    {
+        if (parameters[i].address == PARAM_ADDRESS_TIME)
+        {
+            time_param_idx = i;
+            break;
+        }
+    }
+
+    if (time_param_idx == -1)
+    {
+        ESP_LOGE("RTC", "Time parameter not found");
+        return;
+    }
+
+    // Free old time value if it exists
+    if (parameters[time_param_idx].value != NULL)
+    {
+        free(parameters[time_param_idx].value);
+        parameters[time_param_idx].value = NULL;
+    }
+
+    // Read current time from RTC
+    uint8_t rtc_registers[8];
+    esp_err_t ret = ds1307_read(0x00, rtc_registers, 7);
+    if (ret != ESP_OK && rtc_present)
+    {
+        ESP_LOGE("RTC", "Failed to read from RTC: %s", esp_err_to_name(ret));
+        parameters[time_param_idx].value = strdup("00:00"); // Default time
+        return;
+    }
+
+    // Get time from RTC: HH:MM format
+    uint8_t hour = bcd_to_binary(rtc_registers[2]);
+    uint8_t minute = bcd_to_binary(rtc_registers[1]);
+
+    // Validate time values
+    if (hour > 23 || minute > 59)
+    {
+        ESP_LOGW("RTC", "Invalid time values read from RTC: %02d:%02d", hour, minute);
+        parameters[time_param_idx].value = strdup("00:00"); // Default time
+    }
+    else
+    {
+        char time_str[16];
+        snprintf(time_str, sizeof(time_str), "%02d:%02d", hour, minute);
+        parameters[time_param_idx].value = strdup(time_str);
+        ESP_LOGI("RTC", "Refreshed time: %s", time_str);
+    }
+}
+
 void keyboard_task(void *pvParameters)
 {
     load_all_parameters();
@@ -1605,6 +1697,13 @@ void keyboard_task(void *pvParameters)
                     {
                         is_authenticated = true;
                         param_idx = 0;
+                        
+                        // Refresh RTC time if showing time parameter (when first entering)
+                        if (parameters[param_idx].address == PARAM_ADDRESS_TIME)
+                        {
+                            refresh_rtc_time();
+                        }
+                        
                         lcd_set_cursor(0, 0);
                         lcd_print("%s", parameters[param_idx].name);
                         lcd_set_cursor(1, 0);
@@ -1632,9 +1731,6 @@ void keyboard_task(void *pvParameters)
                     xSemaphoreGive(lcd_semaphore);
                     semaphore_taken = false;
                 }
-
-                input_pos = 0;
-                memset(input, 0, sizeof(input));
             }
             else if (in_keyboard_mode)
             {
@@ -1810,6 +1906,12 @@ void keyboard_task(void *pvParameters)
                             else
                                 param_idx = NUM_PARAMETERS - 1;
                                 
+                            // Refresh RTC time if showing time parameter
+                            if (parameters[param_idx].address == PARAM_ADDRESS_TIME)
+                            {
+                                refresh_rtc_time();
+                            }
+                                
                             // Display new parameter
                             lcd_clear();
                             lcd_set_cursor(0, 0);
@@ -1841,6 +1943,12 @@ void keyboard_task(void *pvParameters)
                         else if (key == 'C') // Next parameter
                         {
                             param_idx = (param_idx + 1) % NUM_PARAMETERS;
+                            
+                            // Refresh RTC time if showing time parameter
+                            if (parameters[param_idx].address == PARAM_ADDRESS_TIME)
+                            {
+                                refresh_rtc_time();
+                            }
                             
                             // Display new parameter
                             lcd_clear();
@@ -1915,6 +2023,18 @@ void keyboard_task(void *pvParameters)
                         {
                             if (parameters[param_idx].validation.format == FORMAT_DECIMAL)
                             {
+                                // If this is the first character entered, clear the previous value
+                                if (input_pos == 0)
+                                {
+                                    // Clear the display first
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Val:                "); // Clear the entire line
+                                    
+                                    // Enable cursor
+                                    lcd_cursor_show(true);
+                                    lcd_cursor_blink(true);
+                                }
+                                
                                 // Only add decimal if we haven't already added one
                                 bool has_decimal = false;
                                 for (int i = 0; i < input_pos; i++)
@@ -1950,14 +2070,20 @@ void keyboard_task(void *pvParameters)
                         }
                         else if (key >= '0' && key <= '9') // Number input
                         {
+                            // If this is the first digit entered, clear the previous value
+                            if (input_pos == 0)
+                            {
+                                // Clear the display first
+                                lcd_set_cursor(1, 0);
+                                lcd_print("Val:                "); // Clear the entire line
+                                
+                                // Enable cursor for editing
+                                lcd_cursor_show(true);
+                                lcd_cursor_blink(true);
+                            }
+                            
                             if (input_pos < parameters[param_idx].validation.max_length)
                             {
-                                // First input - enable cursor
-                                if (input_pos == 0) {
-                                    lcd_cursor_show(true);
-                                    lcd_cursor_blink(true);
-                                }
-                                
                                 input[input_pos++] = key;
                                 input[input_pos] = '\0';
                                 
@@ -1999,6 +2125,9 @@ void keyboard_task(void *pvParameters)
                             
                             if (input_pos > 0)
                             {
+                                // After saving time, refresh from RTC to ensure accurate display
+                                bool was_time_param = (parameters[param_idx].address == PARAM_ADDRESS_TIME);
+                                
                                 // For time parameters, convert HHMM to standard format
                                 if (parameters[param_idx].type == PARAM_TYPE_TIME && strlen(input) == 4)
                                 {
@@ -2018,35 +2147,76 @@ void keyboard_task(void *pvParameters)
                                 // Set new value
                                 parameters[param_idx].value = strdup(input);
                                 
+                                // Reset validation status before validating
+                                validation_failed = false;
+                                validation_error_message[0] = '\0';
+                                
                                 // Validate and store
                                 if (parameters[param_idx].validate != NULL)
                                 {
                                     parameters[param_idx].validate(parameters[param_idx].value);
                                 }
                                 
-                                store_parameter(param_idx);
-                                
-                                // Format and display the updated value
-                                char formatted_output[32] = {0};
-                                format_input_according_to_rules(
-                                    (char *)parameters[param_idx].value, 
-                                    formatted_output,
-                                    &parameters[param_idx].validation);
-                                
-                                // Show confirmation
-                                lcd_clear();
-                                lcd_set_cursor(0, 0);
-                                lcd_print("Value saved!");
-                                lcd_set_cursor(1, 0);
-                                lcd_print("%s", formatted_output);
-                                vTaskDelay(1000 / portTICK_PERIOD_MS);
-                                
-                                // Show parameter again
-                                lcd_clear();
-                                lcd_set_cursor(0, 0);
-                                lcd_print("%s", parameters[param_idx].name);
-                                lcd_set_cursor(1, 0);
-                                lcd_print("Val: %s", formatted_output);
+                                // Check if validation failed and show error message
+                                if (validation_failed)
+                                {
+                                    // Show error message
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("Invalid input!");
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("%s", validation_error_message);
+                                    vTaskDelay(2000 / portTICK_PERIOD_MS); // Show error for 2 seconds
+                                    
+                                    // Return to parameter display
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("%s", parameters[param_idx].name);
+                                    lcd_set_cursor(1, 0);
+                                    
+                                    // Format and display the current (corrected) value
+                                    char formatted_output[32] = {0};
+                                    format_input_according_to_rules(
+                                        (char *)parameters[param_idx].value, 
+                                        formatted_output,
+                                        &parameters[param_idx].validation);
+                                    lcd_print("Val: %s", formatted_output);
+                                }
+                                else
+                                {
+                                    // Value is valid, proceed with storing
+                                    store_parameter(param_idx);
+                                    
+                                    // Format and display the updated value
+                                    char formatted_output[32] = {0};
+                                    format_input_according_to_rules(
+                                        (char *)parameters[param_idx].value, 
+                                        formatted_output,
+                                        &parameters[param_idx].validation);
+                                    
+                                    // Show confirmation
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("Value saved!");
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("%s", formatted_output);
+                                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+                                    
+                                    // Show parameter again
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("%s", parameters[param_idx].name);
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Val: %s", formatted_output);
+                                    
+                                    // After saving time, refresh the RTC value
+                                    if (was_time_param)
+                                    {
+                                        // Wait a moment for RTC to update
+                                        vTaskDelay(100 / portTICK_PERIOD_MS);
+                                        refresh_rtc_time();
+                                    }
+                                }
                             }
                             
                             // Reset input and keep cursor hidden after saving
@@ -2304,6 +2474,10 @@ void validate_decimal(void *value)
     if (!val_str)
         return;
 
+    // Reset validation status
+    validation_failed = false;
+    validation_error_message[0] = '\0';
+
     // Find the parameter this value belongs to
     parameter_t *param = NULL;
     for (int i = 0; i < NUM_PARAMETERS; i++)
@@ -2323,6 +2497,11 @@ void validate_decimal(void *value)
     // Check range
     if (val < param->validation.min_value || val > param->validation.max_value)
     {
+        // Set validation error flag and message
+        validation_failed = true;
+        snprintf(validation_error_message, sizeof(validation_error_message), 
+                "Range %.1f-%.1f", param->validation.min_value, param->validation.max_value);
+        
         // Reset to default value
         strcpy(val_str, param->default_value);
         return;
