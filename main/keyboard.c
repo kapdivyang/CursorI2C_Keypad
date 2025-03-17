@@ -169,9 +169,9 @@ static int password_retries = 0;
 static bool is_authenticated = false;
 
 // Add these global variables at the top of the file with other globals
-static TickType_t cursor_last_toggle_time = 0;
-static bool cursor_visible = true;
-static const TickType_t CURSOR_BLINK_INTERVAL_MS = 500; // Blink every 500ms
+// static TickType_t cursor_last_toggle_time = 0;
+// static bool cursor_visible = true;
+// static const TickType_t CURSOR_BLINK_INTERVAL_MS = 500; // Blink every 500ms
 
 // This new function will handle the validation logic
 static bool is_valid_date(const char *date_str)
@@ -1469,7 +1469,7 @@ void keyboard_task(void *pvParameters)
 
     // Initialize last activity time
     last_activity_time = xTaskGetTickCount();
-    cursor_last_toggle_time = xTaskGetTickCount();
+    // cursor_last_toggle_time = xTaskGetTickCount(); // Not needed anymore
 
     // This variable is used throughout the function to track semaphore state
     volatile bool semaphore_taken __attribute__((unused)) = false;
@@ -1479,67 +1479,7 @@ void keyboard_task(void *pvParameters)
         char key = keypad_scan();
         TickType_t current_time = xTaskGetTickCount();
 
-        // Check for cursor blink timing
-        bool should_update_cursor = false;
-        if (in_keyboard_mode && !password_mode && is_authenticated && 
-            ((current_time - cursor_last_toggle_time) * portTICK_PERIOD_MS >= CURSOR_BLINK_INTERVAL_MS))
-        {
-            cursor_visible = !cursor_visible;
-            cursor_last_toggle_time = current_time;
-            should_update_cursor = true;
-        }
-
-        // Update cursor display if needed and editing a parameter
-        if (should_update_cursor && input_pos > 0 && in_keyboard_mode && is_authenticated)
-        {
-            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-            {
-                semaphore_taken = true;
-                
-                // Format the current input with or without the cursor character
-                char display_input[32] = {0};
-                strcpy(display_input, input);
-                
-                // Get formatted version for display
-                char formatted_output[32] = {0};
-                format_input_according_to_rules(display_input, formatted_output, &parameters[param_idx].validation);
-                
-                // For blinking effect: replace the cursor position with a space or the actual character
-                int display_pos = input_pos;
-                
-                // For special formats, determine actual display position
-                if (parameters[param_idx].validation.format == FORMAT_TIME && input_pos >= 2)
-                {
-                    // Account for the colon in time display
-                    display_pos += 1;
-                }
-                else if (parameters[param_idx].validation.format == FORMAT_DATE && input_pos >= 2)
-                {
-                    // Account for slashes in date display
-                    if (input_pos >= 4)
-                        display_pos += 2; // Two slashes for positions 4+
-                    else
-                        display_pos += 1; // One slash for positions 2-3
-                }
-                
-                // Create a copy for display with blinking character
-                char display_with_cursor[32] = {0};
-                strcpy(display_with_cursor, formatted_output);
-                
-                if (!cursor_visible && display_pos < strlen(formatted_output))
-                {
-                    display_with_cursor[display_pos] = ' '; // Replace with space when cursor is invisible
-                }
-                
-                // Update display
-                lcd_set_cursor(1, 0);
-                lcd_print("Val: %s", display_with_cursor);
-                
-                xSemaphoreGive(lcd_semaphore);
-                semaphore_taken = false;
-            }
-        }
-
+        // Remove the software cursor blink timing check
         // Check for inactivity timeout
         if (in_keyboard_mode &&
             ((current_time - last_activity_time) * portTICK_PERIOD_MS >= INACTIVITY_TIMEOUT_MS))
@@ -1553,6 +1493,7 @@ void keyboard_task(void *pvParameters)
             if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
             {
                 semaphore_taken = true;
+                lcd_cursor_show(false); // Turn off cursor when exiting
                 lcd_clear();
                 lcd_set_cursor(0, 0);
                 lcd_print("Timeout");
@@ -1656,6 +1597,9 @@ void keyboard_task(void *pvParameters)
                         lcd_print("Enter Password:");
                         lcd_set_cursor(1, 0);
                         lcd_print(">");
+                        lcd_set_cursor(1, 1); // Position cursor after ">"
+                        lcd_cursor_show(true); // Show cursor for password entry
+                        lcd_cursor_blink(true); // Enable blinking
                     }
                     else
                     {
@@ -1674,10 +1618,14 @@ void keyboard_task(void *pvParameters)
                                 formatted_output,
                                 &parameters[param_idx].validation);
                             lcd_print("Val: %s", formatted_output);
+                            
+                            // Don't show cursor yet as we're not editing
+                            lcd_cursor_show(false);
                         }
                         else
                         {
                             lcd_print("Val: <none>");
+                            lcd_cursor_show(false);
                         }
                     }
 
@@ -1699,6 +1647,9 @@ void keyboard_task(void *pvParameters)
 
                         if (is_locked_out)
                         {
+                            // Turn off cursor during lockout
+                            lcd_cursor_show(false);
+                            
                             // Display lockout message and countdown
                             TickType_t current_time = xTaskGetTickCount();
                             int elapsed_seconds = ((current_time - lockout_start) * portTICK_PERIOD_MS) / 1000;
@@ -1721,6 +1672,9 @@ void keyboard_task(void *pvParameters)
                                 // Update display with asterisks for password
                                 lcd_set_cursor(1, 0);
                                 lcd_print(">%s", input);
+                                
+                                // Position cursor for next input
+                                lcd_set_cursor(1, input_pos + 1); // +1 for the '>' character
                             }
                         }
                         else if (key == 'D') // Delete
@@ -1732,10 +1686,16 @@ void keyboard_task(void *pvParameters)
                                 // Update display
                                 lcd_set_cursor(1, 0);
                                 lcd_print(">%s ", input); // Space to clear last character
+                                
+                                // Position cursor for next input
+                                lcd_set_cursor(1, input_pos + 1); // +1 for the '>' character
                             }
                         }
                         else if (key == '#') // Submit password
                         {
+                            // Hide cursor during processing
+                            lcd_cursor_show(false);
+                            
                             if (check_password(input))
                             {
                                 // Password correct
@@ -1802,6 +1762,8 @@ void keyboard_task(void *pvParameters)
                                     lcd_print("Enter Password:");
                                     lcd_set_cursor(1, 0);
                                     lcd_print(">");
+                                    lcd_set_cursor(1, 1); // Position cursor after ">"
+                                    lcd_cursor_show(true); // Show cursor for password entry
                                 }
                                 
                                 // Clear input for next attempt
@@ -1814,6 +1776,9 @@ void keyboard_task(void *pvParameters)
                             // Exit password mode
                             in_keyboard_mode = false;
                             password_mode = false;
+                            
+                            // Hide cursor when exiting
+                            lcd_cursor_show(false);
                             lcd_clear();
                         }
 
@@ -1828,8 +1793,11 @@ void keyboard_task(void *pvParameters)
                     {
                         semaphore_taken = true;
                         
-                        if (key == 'A') // Changed: Use A to exit keyboard mode instead of navigating
+                        if (key == 'A') // Exit keyboard mode
                         {
+                            // Turn off cursor when exiting
+                            lcd_cursor_show(false);
+                            
                             // Exit keyboard mode
                             in_keyboard_mode = false;
                             is_authenticated = false;
@@ -1863,11 +1831,14 @@ void keyboard_task(void *pvParameters)
                                 lcd_print("Val: <none>");
                             }
                             
+                            // Hide cursor when just viewing
+                            lcd_cursor_show(false);
+                            
                             // Reset input
                             memset(input, 0, sizeof(input));
                             input_pos = 0;
                         }
-                        else if (key == 'C') // Next parameter (changed from exit to next)
+                        else if (key == 'C') // Next parameter
                         {
                             param_idx = (param_idx + 1) % NUM_PARAMETERS;
                             
@@ -1892,6 +1863,9 @@ void keyboard_task(void *pvParameters)
                                 lcd_print("Val: <none>");
                             }
                             
+                            // Hide cursor when just viewing
+                            lcd_cursor_show(false);
+                            
                             // Reset input
                             memset(input, 0, sizeof(input));
                             input_pos = 0;
@@ -1903,8 +1877,38 @@ void keyboard_task(void *pvParameters)
                                 input[--input_pos] = '\0';
                                 
                                 // Update display
+                                char formatted_output[32] = {0};
+                                if (input_pos > 0) {
+                                    format_input_according_to_rules(
+                                        input, 
+                                        formatted_output,
+                                        &parameters[param_idx].validation);
+                                }
+                                
                                 lcd_set_cursor(1, 0);
-                                lcd_print("Val: %s ", input); // Space to clear last character
+                                lcd_print("Val: %s ", formatted_output); // Space to clear last character
+                                
+                                // Set cursor position for editing
+                                int cursor_pos = 5; // "Val: " is 5 characters
+                                
+                                // Handle formatted display with different cursor positions
+                                if (parameters[param_idx].validation.format == FORMAT_TIME) {
+                                    // For time format (HH:MM), calculate cursor position
+                                    cursor_pos += (input_pos < 2) ? input_pos : input_pos + 1; // +1 for the colon
+                                } 
+                                else if (parameters[param_idx].validation.format == FORMAT_DATE) {
+                                    // For date format (DD/MM/YY), calculate cursor position
+                                    if (input_pos < 2) cursor_pos += input_pos;
+                                    else if (input_pos < 4) cursor_pos += input_pos + 1; // +1 for first slash
+                                    else cursor_pos += input_pos + 2; // +2 for two slashes
+                                }
+                                else {
+                                    cursor_pos += input_pos;
+                                }
+                                
+                                lcd_set_cursor(1, cursor_pos);
+                                lcd_cursor_show(true);
+                                lcd_cursor_blink(true);
                             }
                         }
                         else if (key == '*') // Decimal point for decimal parameters
@@ -1928,8 +1932,19 @@ void keyboard_task(void *pvParameters)
                                     input[input_pos] = '\0';
                                     
                                     // Update display
+                                    char formatted_output[32] = {0};
+                                    format_input_according_to_rules(
+                                        input, 
+                                        formatted_output,
+                                        &parameters[param_idx].validation);
+                                    
                                     lcd_set_cursor(1, 0);
-                                    lcd_print("Val: %s", input);
+                                    lcd_print("Val: %s", formatted_output);
+                                    
+                                    // Set cursor position for editing
+                                    lcd_set_cursor(1, 5 + input_pos); // "Val: " is 5 characters
+                                    lcd_cursor_show(true);
+                                    lcd_cursor_blink(true);
                                 }
                             }
                         }
@@ -1937,12 +1952,14 @@ void keyboard_task(void *pvParameters)
                         {
                             if (input_pos < parameters[param_idx].validation.max_length)
                             {
+                                // First input - enable cursor
+                                if (input_pos == 0) {
+                                    lcd_cursor_show(true);
+                                    lcd_cursor_blink(true);
+                                }
+                                
                                 input[input_pos++] = key;
                                 input[input_pos] = '\0';
-                                
-                                // Reset cursor state
-                                cursor_visible = true;
-                                cursor_last_toggle_time = current_time;
                                 
                                 // Format and display input
                                 char formatted_output[32] = {0};
@@ -1953,10 +1970,33 @@ void keyboard_task(void *pvParameters)
                                 
                                 lcd_set_cursor(1, 0);
                                 lcd_print("Val: %s", formatted_output);
+                                
+                                // Set cursor position for editing based on format type
+                                int cursor_pos = 5; // "Val: " is 5 characters
+                                
+                                // Handle formatted display with different cursor positions
+                                if (parameters[param_idx].validation.format == FORMAT_TIME) {
+                                    // For time format (HH:MM), calculate cursor position
+                                    cursor_pos += (input_pos < 2) ? input_pos : input_pos + 1; // +1 for the colon
+                                } 
+                                else if (parameters[param_idx].validation.format == FORMAT_DATE) {
+                                    // For date format (DD/MM/YY), calculate cursor position
+                                    if (input_pos < 2) cursor_pos += input_pos;
+                                    else if (input_pos < 4) cursor_pos += input_pos + 1; // +1 for first slash
+                                    else cursor_pos += input_pos + 2; // +2 for two slashes
+                                }
+                                else {
+                                    cursor_pos += input_pos;
+                                }
+                                
+                                lcd_set_cursor(1, cursor_pos);
                             }
                         }
                         else if (key == '#') // Submit value
                         {
+                            // Hide cursor during processing
+                            lcd_cursor_show(false);
+                            
                             if (input_pos > 0)
                             {
                                 // For time parameters, convert HHMM to standard format
@@ -2009,7 +2049,7 @@ void keyboard_task(void *pvParameters)
                                 lcd_print("Val: %s", formatted_output);
                             }
                             
-                            // Reset input
+                            // Reset input and keep cursor hidden after saving
                             memset(input, 0, sizeof(input));
                             input_pos = 0;
                         }
