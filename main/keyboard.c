@@ -177,6 +177,74 @@ static bool is_authenticated = false;
 static bool validation_failed = false;
 static char validation_error_message[64] = {0};
 
+// Add global shared buffer for temporary string operations
+static char shared_buffer[128];
+
+// Add unit labels for parameters
+typedef struct {
+    const char* name;
+    const char* unit;
+} param_unit_t;
+
+// Define units for relevant parameters
+const param_unit_t param_units[] = {
+    {"03.HiVolt:", "V"},
+    {"04.LoVolt:", "V"},
+    {"05.HiAmps:", "A"},
+    {"06.MinAmps:", "A"},
+    {"07.MaxAmps:", "A"},
+    {"08.MinDC:", "%"},
+    {"23.LockTm:", "s"},
+    {NULL, NULL}  // Terminator
+};
+
+// Function to get unit for a parameter
+static const char* get_param_unit(const char* param_name) {
+    for (int i = 0; param_units[i].name != NULL; i++) {
+        if (strcmp(param_units[i].name, param_name) == 0) {
+            return param_units[i].unit;
+        }
+    }
+    return "";
+}
+
+// Function to show saving animation
+static void show_saving_animation(void) {
+    static const char* frames[] = {
+        "Saving.",
+        "Saving..",
+        "Saving...",
+        "Saving...."
+    };
+    
+    for (int i = 0; i < 4; i++) {
+        if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+            lcd_set_cursor(0, 0);
+            lcd_print("%-16s", frames[i]);  // Pad with spaces to clear line
+            xSemaphoreGive(lcd_semaphore);
+        }
+        vTaskDelay(150 / portTICK_PERIOD_MS);
+    }
+}
+
+// Function to show parameter range
+static void show_parameter_range(const parameter_t* param) {
+    if (param->validation.format == FORMAT_DECIMAL || 
+        param->type == PARAM_TYPE_NUMBER) {
+        
+        sprintf(shared_buffer, "Range: %.1f to %.1f", 
+                param->validation.min_value, 
+                param->validation.max_value);
+                
+        if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+            lcd_set_cursor(1, 0);
+            lcd_print("%-16s", shared_buffer);  // Pad with spaces to clear line
+            xSemaphoreGive(lcd_semaphore);
+        }
+        vTaskDelay(1500 / portTICK_PERIOD_MS);
+    }
+}
+
 // This new function will handle the validation logic
 static bool is_valid_date(const char *date_str)
 {
@@ -1582,8 +1650,6 @@ static void refresh_rtc_time(void)
     }
 }
 
-// Comment out unused category-related code for now
-/*
 // Add category definitions
 typedef enum {
     CAT_TIME_DATE,
@@ -1604,16 +1670,158 @@ const char* category_names[NUM_CATEGORIES] = {
 };
 
 // Assign categories to parameters
-param_category_t param_categories[NUM_PARAMETERS] = {
-    CAT_TIME_DATE,  // 01.Time
-    CAT_TIME_DATE,  // 02.Date
-    CAT_SYSTEM,     // 03.HiVolt
-    // etc.
+// This maps each parameter to its category
+const param_category_t param_categories[NUM_PARAMETERS] = {
+    CAT_TIME_DATE,    // 01.Time
+    CAT_TIME_DATE,    // 02.Date
+    CAT_SYSTEM,       // 03.HiVolt
+    CAT_SYSTEM,       // 04.LoVolt
+    CAT_SYSTEM,       // 05.HiAmps
+    CAT_SYSTEM,       // 06.MinAmps
+    CAT_SYSTEM,       // 07.MaxAmps
+    CAT_SYSTEM,       // 08.MinDC
+    CAT_PROTECTION,   // 09.Alarm
+    CAT_PROTECTION,   // 10.Protect
+    CAT_STAGGERING,   // 11.Rotate
+    CAT_STAGGERING,   // 12.Stagger
+    CAT_STAGGERING,   // 13.EvDelay
+    CAT_STAGGERING,   // 14.A OnTm
+    CAT_STAGGERING,   // 15.A OffTm
+    CAT_STAGGERING,   // 16.B OnTm
+    CAT_STAGGERING,   // 17.B OffTm
+    CAT_TWILIGHT,     // 18.BackSet
+    CAT_TWILIGHT,     // 19.BackRise
+    CAT_TWILIGHT,     // 20.JanDusk
+    CAT_TWILIGHT,     // 21.JunDusk
+    CAT_TWILIGHT,     // 22.JanDawn
+    CAT_SYSTEM,       // 23.LockTm
+    CAT_SYSTEM,       // 24.Password
+    CAT_SYSTEM        // 25.PassEd
 };
 
-// Add category navigation in keyboard_task:
-static param_category_t current_category = CAT_TIME_DATE;
-*/
+// Function to find the first parameter in a category
+static int find_first_param_in_category(param_category_t category) {
+    for (int i = 0; i < NUM_PARAMETERS; i++) {
+        if (param_categories[i] == category) {
+            return i;
+        }
+    }
+    return 0; // Default to first parameter if not found
+}
+
+// Function to find the next parameter in the same category
+static int find_next_param_in_category(int current_idx) {
+    param_category_t current_category = param_categories[current_idx];
+    int next_idx = (current_idx + 1) % NUM_PARAMETERS;
+    
+    // If the next parameter is in the same category, return it
+    if (param_categories[next_idx] == current_category) {
+        return next_idx;
+    }
+    
+    // Otherwise, find the first parameter in the current category
+    return find_first_param_in_category(current_category);
+}
+
+// Function to find the previous parameter in the same category
+static int find_prev_param_in_category(int current_idx) {
+    param_category_t current_category = param_categories[current_idx];
+    int prev_idx = (current_idx > 0) ? (current_idx - 1) : (NUM_PARAMETERS - 1);
+    
+    // If the previous parameter is in the same category, return it
+    if (param_categories[prev_idx] == current_category) {
+        return prev_idx;
+    }
+    
+    // Otherwise, find the last parameter in the current category
+    int last_idx = current_idx;
+    for (int i = 0; i < NUM_PARAMETERS; i++) {
+        if (param_categories[i] == current_category) {
+            last_idx = i;
+        }
+    }
+    
+    return last_idx;
+}
+
+// Find the next category
+static param_category_t find_next_category(param_category_t current_category) {
+    return (current_category + 1) % NUM_CATEGORIES;
+}
+
+// Find the previous category
+static param_category_t find_prev_category(param_category_t current_category) {
+    return (current_category > 0) ? (current_category - 1) : (NUM_CATEGORIES - 1);
+}
+
+// Function to find parameter by number
+static int find_param_by_number(int number) {
+    // Parameter numbers displayed to user start from 1
+    if (number < 1 || number > NUM_PARAMETERS) {
+        return 0; // Default to first parameter if invalid
+    }
+    
+    // Convert 1-based user number to 0-based index
+    return number - 1;
+}
+
+// Function to show parameter search mode
+static void show_search_mode(void) {
+    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+        lcd_clear();
+        lcd_set_cursor(0, 0);
+        lcd_print("Go to parameter:");
+        lcd_set_cursor(1, 0);
+        lcd_print("Enter number (1-25)");
+        lcd_set_cursor(1, 16); // Position cursor at the end
+        lcd_cursor_show(true);
+        lcd_cursor_blink(true);
+        xSemaphoreGive(lcd_semaphore);
+    }
+}
+
+// Helper function to display parameter value with unit
+static void display_parameter_value(int param_idx) {
+    if (parameters[param_idx].value != NULL) {
+        char formatted_output[32] = {0};
+        format_input_according_to_rules(
+            (char *)parameters[param_idx].value, 
+            shared_buffer,
+            &parameters[param_idx].validation);
+            
+        // Get unit for this parameter
+        const char* unit = get_param_unit(parameters[param_idx].name);
+        
+        if (unit[0] != '\0') {
+            lcd_print("Val: %s %s", shared_buffer, unit);
+        } else {
+            lcd_print("Val: %s", shared_buffer);
+        }
+    } else {
+        lcd_print("Val: <none>");
+    }
+}
+
+// Helper function to display current parameter
+static void display_current_parameter(int param_idx) {
+    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+        lcd_clear();
+        lcd_set_cursor(0, 0);
+        lcd_print("%s", parameters[param_idx].name);
+        lcd_set_cursor(1, 0);
+        
+        // Display value with unit
+        display_parameter_value(param_idx);
+        
+        xSemaphoreGive(lcd_semaphore);
+    }
+}
+
+// Add this global flag to track if we're saving a parameter
+static volatile bool is_saving_parameter = false;
+
+// At the top of the file, with other tags/includes
+static const char *TAG = "Keypad";
 
 void keyboard_task(void *pvParameters)
 {
@@ -1622,24 +1830,179 @@ void keyboard_task(void *pvParameters)
     int param_idx = 0;
     int input_pos = 0;
     bool password_mode = false;
+    param_category_t current_category = param_categories[0];
+    bool showing_category = false;
+    TickType_t key_press_time = 0;
+    char last_key = '\0';
+    char prev_key = '\0';  // Add explicit prev_key definition
+
+    // Add long-press detection variables
+    TickType_t key_hold_time = 0;
+    bool key_held = false;
+    char held_key = '\0';
+
+    // Add search mode variables
+    bool in_search_mode = false;
+    char search_input[3] = {0}; // Store up to 2 digits + null terminator
+    int search_pos = 0;
 
     // Initialize last activity time
     last_activity_time = xTaskGetTickCount();
-    // cursor_last_toggle_time = xTaskGetTickCount(); // Not needed anymore
 
     // This variable is used throughout the function to track semaphore state
     volatile bool semaphore_taken __attribute__((unused)) = false;
 
-    // Create a single shared buffer:
-    static char shared_buffer[128];
+    // Use a check to ensure semaphore is always released
+    bool ensure_semaphore_release = false;
 
+    // Add debugging variables
+    bool key_processed = false;
+    int last_key_processed = 0;
+    
     while (1)
     {
+        // Reset the saving flag at the top of each loop
+        is_saving_parameter = false;
+        key_processed = false;
+        
         char key = keypad_scan();
         TickType_t current_time = xTaskGetTickCount();
+        
+        // Always release semaphore if it was taken
+        if (ensure_semaphore_release) {
+            xSemaphoreGive(lcd_semaphore);
+            ensure_semaphore_release = false;
+            semaphore_taken = false;
+        }
+        
+        // Long-press detection
+        if (key != '\0' && key == held_key) {
+            // Same key is still pressed
+            if (!key_held && (current_time - key_hold_time) * portTICK_PERIOD_MS >= 1500) {
+                // Key has been held for 1.5 seconds - trigger long press action
+                key_held = true;
+                
+                // Handle long-press actions
+                if (in_keyboard_mode && is_authenticated && !password_mode) {
+                    if (key == '0') {
+                        // Long-press 0 - reset to default value
+                        if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                            semaphore_taken = true;
+                            
+                            // Show reset message
+                            lcd_clear();
+                            lcd_set_cursor(0, 0);
+                            lcd_print("Resetting to");
+                            lcd_set_cursor(1, 0);
+                            lcd_print("default value");
+                            
+                            xSemaphoreGive(lcd_semaphore);
+                            semaphore_taken = false;
+                            
+                            vTaskDelay(1000 / portTICK_PERIOD_MS);
+                            
+                            // Reset to default value
+                            if (parameters[param_idx].value != NULL) {
+                                free(parameters[param_idx].value);
+                            }
+                            parameters[param_idx].value = strdup((char *)parameters[param_idx].default_value);
+                            
+                            // Validate and store
+                            if (parameters[param_idx].validate != NULL) {
+                                parameters[param_idx].validate(parameters[param_idx].value);
+                            }
+                            store_parameter(param_idx);
+                            
+                            // Refresh display
+                            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                                semaphore_taken = true;
+                                lcd_clear();
+                                lcd_set_cursor(0, 0);
+                                lcd_print("%s", parameters[param_idx].name);
+                                lcd_set_cursor(1, 0);
+                                
+                                // Format and display the updated value
+                                format_input_according_to_rules(
+                                    (char *)parameters[param_idx].value, 
+                                    shared_buffer,
+                                    &parameters[param_idx].validation);
+                                lcd_print("Val: %s", shared_buffer);
+                                
+                                xSemaphoreGive(lcd_semaphore);
+                                semaphore_taken = false;
+                            }
+                        }
+                    }
+                    else if (key == '#' && parameters[param_idx].address == PARAM_ADDRESS_TIME) {
+                        // Long-press # on time parameter - set to current time
+                        if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                            semaphore_taken = true;
+                            
+                            // Show message
+                            lcd_clear();
+                            lcd_set_cursor(0, 0);
+                            lcd_print("Setting to");
+                            lcd_set_cursor(1, 0);
+                            lcd_print("current time");
+                            
+                            xSemaphoreGive(lcd_semaphore);
+                            semaphore_taken = false;
+                            
+                            vTaskDelay(1000 / portTICK_PERIOD_MS);
+                            
+                            // Refresh RTC time
+                            refresh_rtc_time();
+                            
+                            // Refresh display
+                            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                                semaphore_taken = true;
+                                lcd_clear();
+                                lcd_set_cursor(0, 0);
+                                lcd_print("%s", parameters[param_idx].name);
+                                lcd_set_cursor(1, 0);
+                                
+                                // Format and display the updated value
+                                format_input_according_to_rules(
+                                    (char *)parameters[param_idx].value, 
+                                    shared_buffer,
+                                    &parameters[param_idx].validation);
+                                lcd_print("Val: %s", shared_buffer);
+                                
+                                xSemaphoreGive(lcd_semaphore);
+                                semaphore_taken = false;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (key != '\0' && key != held_key) {
+            // New key pressed
+            held_key = key;
+            key_hold_time = current_time;
+            key_held = false;
+        } else if (key == '\0') {
+            // No key pressed
+            held_key = '\0';
+            key_held = false;
+        }
 
-        // Remove the software cursor blink timing check
-        // Check for inactivity timeout
+        // Check if showing category and we should return to parameter display
+        if (showing_category && ((current_time - key_press_time) * portTICK_PERIOD_MS >= 1000)) {
+            showing_category = false;
+            
+            // Find first parameter in category and display it
+            param_idx = find_first_param_in_category(current_category);
+            
+            // Refresh RTC time if showing time parameter
+            if (parameters[param_idx].address == PARAM_ADDRESS_TIME) {
+                refresh_rtc_time();
+            }
+            
+            // Display the parameter
+            display_current_parameter(param_idx);
+        }
+
+        // Check for inactivity timeout - CRITICAL: this must run on every loop iteration
         if (in_keyboard_mode &&
             ((current_time - last_activity_time) * portTICK_PERIOD_MS >= INACTIVITY_TIMEOUT_MS))
         {
@@ -1648,9 +2011,11 @@ void keyboard_task(void *pvParameters)
             is_authenticated = false;
             password_mode = false;
             is_locked_out = false;
+            in_search_mode = false; // Also reset search mode flag
 
             if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
             {
+                ensure_semaphore_release = true;
                 semaphore_taken = true;
                 lcd_cursor_show(false); // Turn off cursor when exiting
                 lcd_clear();
@@ -1660,11 +2025,15 @@ void keyboard_task(void *pvParameters)
                 lcd_print("Returning to main");
                 vTaskDelay(1000 / portTICK_PERIOD_MS);
                 xSemaphoreGive(lcd_semaphore);
+                ensure_semaphore_release = false;
                 semaphore_taken = false;
             }
 
+            // Reset all input state
             input_pos = 0;
             memset(input, 0, sizeof(input));
+            search_pos = 0;
+            memset(search_input, 0, sizeof(search_input));
 
             // Reset last activity time
             last_activity_time = xTaskGetTickCount();
@@ -1716,10 +2085,73 @@ void keyboard_task(void *pvParameters)
             }
         }
 
-        if (key != '\0')
+        if (key != '\0' && !key_held)
         {
             // Update last activity time when a key is pressed
             last_activity_time = xTaskGetTickCount();
+            key_press_time = current_time;
+            
+            // Store last key for detecting key combinations
+            prev_key = last_key;
+            last_key = key;
+            
+            // Special shortcut: B+C together to switch categories (forward)
+            if (key == 'C' && prev_key == 'B' && 
+                (current_time - key_press_time) * portTICK_PERIOD_MS < 500) 
+            {
+                // Only process if in edit mode and authenticated
+                if (in_keyboard_mode && is_authenticated && !password_mode) {
+                    // Switch to next category
+                    current_category = find_next_category(current_category);
+                    showing_category = true;
+                    
+                    // Display category header
+                    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                        semaphore_taken = true;
+                        lcd_clear();
+                        lcd_set_cursor(0, 0);
+                        lcd_print(">%s<", category_names[current_category]);
+                        
+                        // Show navigation hint
+                        lcd_set_cursor(1, 0);
+                        lcd_print("B+C:Next B+D:Prev");
+                        
+                        xSemaphoreGive(lcd_semaphore);
+                        semaphore_taken = false;
+                    }
+                    
+                    continue;
+                }
+            }
+            
+            // Special shortcut: B+D together to switch categories (backward)
+            if (key == 'D' && prev_key == 'B' && 
+                (current_time - key_press_time) * portTICK_PERIOD_MS < 500) 
+            {
+                // Only process if in edit mode and authenticated
+                if (in_keyboard_mode && is_authenticated && !password_mode) {
+                    // Switch to previous category
+                    current_category = find_prev_category(current_category);
+                    showing_category = true;
+                    
+                    // Display category header
+                    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                        semaphore_taken = true;
+                        lcd_clear();
+                        lcd_set_cursor(0, 0);
+                        lcd_print(">%s<", category_names[current_category]);
+                        
+                        // Show navigation hint
+                        lcd_set_cursor(1, 0);
+                        lcd_print("B+C:Next B+D:Prev");
+                        
+                        xSemaphoreGive(lcd_semaphore);
+                        semaphore_taken = false;
+                    }
+                    
+                    continue;
+                }
+            }
 
             if (!in_keyboard_mode && key == 'A')
             {
@@ -1962,13 +2394,11 @@ void keyboard_task(void *pvParameters)
                             is_authenticated = false;
                             lcd_clear();
                         }
-                        else if (key == 'B') // Previous parameter
+                        else if (key == 'B') // Previous parameter (within same category)
                         {
-                            if (param_idx > 0)
-                                param_idx--;
-                            else
-                                param_idx = NUM_PARAMETERS - 1;
-                                
+                            // Find previous parameter in the same category
+                            param_idx = find_prev_param_in_category(param_idx);
+                            
                             // Refresh RTC time if showing time parameter
                             if (parameters[param_idx].address == PARAM_ADDRESS_TIME)
                             {
@@ -1984,11 +2414,12 @@ void keyboard_task(void *pvParameters)
                             // Format and display current value
                             if (parameters[param_idx].value != NULL)
                             {
+                                char formatted_output[32] = {0};
                                 format_input_according_to_rules(
                                     (char *)parameters[param_idx].value, 
-                                    shared_buffer,
+                                    formatted_output,
                                     &parameters[param_idx].validation);
-                                lcd_print("Val: %s", shared_buffer);
+                                lcd_print("Val: %s", formatted_output);
                             }
                             else
                             {
@@ -2002,9 +2433,10 @@ void keyboard_task(void *pvParameters)
                             memset(input, 0, sizeof(input));
                             input_pos = 0;
                         }
-                        else if (key == 'C') // Next parameter
+                        else if (key == 'C') // Next parameter (within same category)
                         {
-                            param_idx = (param_idx + 1) % NUM_PARAMETERS;
+                            // Find next parameter in the same category
+                            param_idx = find_next_param_in_category(param_idx);
                             
                             // Refresh RTC time if showing time parameter
                             if (parameters[param_idx].address == PARAM_ADDRESS_TIME)
@@ -2021,11 +2453,12 @@ void keyboard_task(void *pvParameters)
                             // Format and display current value
                             if (parameters[param_idx].value != NULL)
                             {
+                                char formatted_output[32] = {0};
                                 format_input_according_to_rules(
                                     (char *)parameters[param_idx].value, 
-                                    shared_buffer,
+                                    formatted_output,
                                     &parameters[param_idx].validation);
-                                lcd_print("Val: %s", shared_buffer);
+                                lcd_print("Val: %s", formatted_output);
                             }
                             else
                             {
@@ -2234,8 +2667,14 @@ void keyboard_task(void *pvParameters)
                                 lcd_set_cursor(1, cursor_pos);
                             }
                         }
-                        else if (key == '#') // Submit value
+                        else if (key == '#' && !is_saving_parameter) // Submit value
                         {
+                            key_processed = true;
+                            last_key_processed = '#';
+                            
+                            // Set the flag to indicate we're saving
+                            is_saving_parameter = true;
+                            
                             // Hide cursor during processing
                             lcd_cursor_show(false);
                             
@@ -2300,42 +2739,91 @@ void keyboard_task(void *pvParameters)
                                 else
                                 {
                                     // Value is valid, proceed with storing
-                                    store_parameter(param_idx);
-                                    
-                                    // Format and display the updated value
-                                    format_input_according_to_rules(
-                                        (char *)parameters[param_idx].value, 
-                                        shared_buffer,
-                                        &parameters[param_idx].validation);
-                                    
-                                    // Show confirmation
                                     lcd_clear();
                                     lcd_set_cursor(0, 0);
-                                    lcd_print("Value saved!");
-                                    lcd_set_cursor(1, 0);
-                                    lcd_print("%s", shared_buffer);
-                                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+                                    lcd_print("Saving...");
                                     
-                                    // Show parameter again
-                                    lcd_clear();
-                                    lcd_set_cursor(0, 0);
-                                    lcd_print("%s", parameters[param_idx].name);
-                                    lcd_set_cursor(1, 0);
-                                    lcd_print("Val: %s", shared_buffer);
+                                    // Release semaphore to ensure display updates
+                                    xSemaphoreGive(lcd_semaphore);
+                                    vTaskDelay(300 / portTICK_PERIOD_MS);
                                     
-                                    // After saving time, refresh the RTC value
-                                    if (was_time_param)
+                                    // Re-take semaphore for next step
+                                    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
                                     {
-                                        // Wait a moment for RTC to update
-                                        vTaskDelay(100 / portTICK_PERIOD_MS);
-                                        refresh_rtc_time();
+                                        // Store the parameter
+                                        store_parameter(param_idx);
+                                        
+                                        // Format and display the updated value
+                                        format_input_according_to_rules(
+                                            (char *)parameters[param_idx].value, 
+                                            shared_buffer,
+                                            &parameters[param_idx].validation);
+                                        
+                                        // Get unit for this parameter
+                                        const char* unit = get_param_unit(parameters[param_idx].name);
+                                        
+                                        // Show confirmation with unit if applicable
+                                        lcd_clear();
+                                        lcd_set_cursor(0, 0);
+                                        lcd_print("Value saved!");
+                                        lcd_set_cursor(1, 0);
+                                        if (unit[0] != '\0') {
+                                            lcd_print("%s %s", shared_buffer, unit);
+                                        } else {
+                                            lcd_print("%s", shared_buffer);
+                                        }
+                                        
+                                        // Release semaphore to ensure display updates
+                                        xSemaphoreGive(lcd_semaphore);
+                                        vTaskDelay(1500 / portTICK_PERIOD_MS);
+                                        
+                                        // Re-take semaphore for next step
+                                        if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+                                        {
+                                            // Show parameter again
+                                            lcd_clear();
+                                            lcd_set_cursor(0, 0);
+                                            lcd_print("%s", parameters[param_idx].name);
+                                            lcd_set_cursor(1, 0);
+                                            if (unit[0] != '\0') {
+                                                lcd_print("Val: %s %s", shared_buffer, unit);
+                                            } else {
+                                                lcd_print("Val: %s", shared_buffer);
+                                            }
+                                            
+                                            // After saving time, refresh the RTC value
+                                            if (was_time_param)
+                                            {
+                                                // Wait a moment for RTC to update
+                                                vTaskDelay(100 / portTICK_PERIOD_MS);
+                                                refresh_rtc_time();
+                                            }
+                                            
+                                            // Make sure to release semaphore before continuing
+                                            xSemaphoreGive(lcd_semaphore);
+                                            semaphore_taken = false;
+                                        }
+                                        else
+                                        {
+                                            semaphore_taken = false;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        semaphore_taken = false;
                                     }
                                 }
                             }
                             
-                            // Reset input and keep cursor hidden after saving
+                            // Reset input - ALWAYS do this after handling the # key
                             memset(input, 0, sizeof(input));
                             input_pos = 0;
+                            
+                            // Update the last activity time to prevent immediate timeout
+                            last_activity_time = xTaskGetTickCount();
+                            
+                            // Clear the flag now that we're done saving
+                            is_saving_parameter = false;
                         }
 
                         xSemaphoreGive(lcd_semaphore);
@@ -2346,6 +2834,217 @@ void keyboard_task(void *pvParameters)
         }
         
         // Small delay to prevent high CPU usage
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+
+        // Handle key press for search mode
+        if (in_search_mode && key != '\0' && !key_held)
+        {
+            // Update activity time
+            last_activity_time = xTaskGetTickCount();
+            key_press_time = current_time;
+            
+            // Store key history even in search mode
+            prev_key = last_key;
+            last_key = key;
+
+            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+            {
+                semaphore_taken = true;
+                
+                if (key >= '0' && key <= '9' && search_pos < 2)
+                {
+                    // Add digit to search input
+                    search_input[search_pos++] = key;
+                    search_input[search_pos] = '\0';
+                    
+                    // Show input
+                    lcd_set_cursor(1, 0);
+                    lcd_print("Enter: %s_        ", search_input);
+                    lcd_set_cursor(1, 7 + search_pos);
+                }
+                else if (key == 'D' && search_pos > 0)
+                {
+                    // Delete last digit
+                    search_input[--search_pos] = '\0';
+                    
+                    // Show input
+                    lcd_set_cursor(1, 0);
+                    if (search_pos > 0) {
+                        lcd_print("Enter: %s_        ", search_input);
+                    } else {
+                        lcd_print("Enter number (1-25)");
+                    }
+                    lcd_set_cursor(1, 7 + search_pos);
+                }
+                else if (key == '#' && search_pos > 0)
+                {
+                    // Process search
+                    int number = atoi(search_input);
+                    param_idx = find_param_by_number(number);
+                    
+                    // Exit search mode
+                    in_search_mode = false;
+                    lcd_cursor_show(false);
+                    
+                    // Update current category based on the selected parameter
+                    current_category = param_categories[param_idx];
+                    
+                    // Refresh RTC time if showing time parameter
+                    if (parameters[param_idx].address == PARAM_ADDRESS_TIME)
+                    {
+                        refresh_rtc_time();
+                    }
+                    
+                    // Display parameter
+                    lcd_clear();
+                    lcd_set_cursor(0, 0);
+                    lcd_print("%s", parameters[param_idx].name);
+                    lcd_set_cursor(1, 0);
+                    
+                    // Format and display current value
+                    if (parameters[param_idx].value != NULL)
+                    {
+                        char formatted_output[32] = {0};
+                        format_input_according_to_rules(
+                            (char *)parameters[param_idx].value, 
+                            formatted_output,
+                            &parameters[param_idx].validation);
+                            
+                        // Get unit for this parameter
+                        const char* unit = get_param_unit(parameters[param_idx].name);
+                        
+                        if (unit[0] != '\0') {
+                            lcd_print("Val: %s %s", formatted_output, unit);
+                        } else {
+                            lcd_print("Val: %s", formatted_output);
+                        }
+                    }
+                    else
+                    {
+                        lcd_print("Val: <none>");
+                    }
+                }
+                else if (key == 'A' || key == 'B' || key == 'C')
+                {
+                    // Cancel search mode
+                    in_search_mode = false;
+                    lcd_cursor_show(false);
+                    
+                    // Return to parameter display
+                    lcd_clear();
+                    lcd_set_cursor(0, 0);
+                    lcd_print("%s", parameters[param_idx].name);
+                    lcd_set_cursor(1, 0);
+                    
+                    // Format and display current value
+                    if (parameters[param_idx].value != NULL)
+                    {
+                        char formatted_output[32] = {0};
+                        format_input_according_to_rules(
+                            (char *)parameters[param_idx].value, 
+                            formatted_output,
+                            &parameters[param_idx].validation);
+                            
+                        // Get unit for this parameter
+                        const char* unit = get_param_unit(parameters[param_idx].name);
+                        
+                        if (unit[0] != '\0') {
+                            lcd_print("Val: %s %s", formatted_output, unit);
+                        } else {
+                            lcd_print("Val: %s", formatted_output);
+                        }
+                    }
+                    else
+                    {
+                        lcd_print("Val: <none>");
+                    }
+                }
+                
+                xSemaphoreGive(lcd_semaphore);
+                semaphore_taken = false;
+            }
+        }
+
+        // Handle normal key presses when not in search mode
+        if (key != '\0' && !key_held && !in_search_mode)
+        {
+            // Update last activity time when a key is pressed
+            last_activity_time = xTaskGetTickCount();
+            key_press_time = current_time;
+            
+            // Store last key for detecting key combinations
+            prev_key = last_key;
+            last_key = key;
+            
+            // Special shortcut: * and # together to enter search mode
+            if (key == '#' && prev_key == '*' && 
+                (current_time - key_press_time) * portTICK_PERIOD_MS < 500) 
+            {
+                // Only process if in edit mode and authenticated
+                if (in_keyboard_mode && is_authenticated && !password_mode) {
+                    // Enter search mode
+                    in_search_mode = true;
+                    search_pos = 0;
+                    memset(search_input, 0, sizeof(search_input));
+                    
+                    // Show search interface
+                    show_search_mode();
+                }
+            }
+            else if (!in_keyboard_mode && key == 'A')
+            {
+                // ... existing code ...
+            }
+            else if (in_keyboard_mode)
+            {
+                // ... existing code ...
+            }
+        }
+        
+        // Small delay to prevent high CPU usage
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+
+        // Add safety checks at the end of each loop iteration
+        // to ensure we never get stuck in an unresponsive state
+        
+        // Safety check: Make sure semaphore is always released
+        if (semaphore_taken) {
+            ESP_LOGW(TAG, "Semaphore still held at end of loop - releasing");
+            xSemaphoreGive(lcd_semaphore);
+            semaphore_taken = false;
+        }
+        
+        // Safety check: Always process timeout
+        current_time = xTaskGetTickCount();
+        if ((current_time - last_activity_time) > INACTIVITY_TIMEOUT_MS) {
+            // Reset all states on timeout
+            if (in_search_mode) {
+                in_search_mode = false;
+                // Clear search mode display
+                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                    lcd_clear();
+                    display_current_parameter(param_idx);
+                    xSemaphoreGive(lcd_semaphore);
+                }
+            }
+            
+            // Reset input if in edit mode
+            if (input_pos > 0) {
+                memset(input, 0, sizeof(input));
+                input_pos = 0;
+                
+                // Refresh display
+                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                    display_current_parameter(param_idx);
+                    xSemaphoreGive(lcd_semaphore);
+                }
+            }
+            
+            // Update timestamp to prevent repeated timeout handling
+            last_activity_time = current_time;
+        }
+        
+        // Always have a delay at the end of the loop to allow other tasks to run
         vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
