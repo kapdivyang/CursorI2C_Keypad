@@ -1,0 +1,191 @@
+�ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:7172
+load:0x40078000,len:15540
+load:0x40080400,len:4
+ho 8 tail 4 room 4
+load:0x40080404,len:3904
+entry 0x40080640
+[0;32mI (31) boot: ESP-IDF v5.2.1-dirty 2nd stage bootloader[0m
+[0;32mI (31) boot: compile time Mar 15 2025 15:13:09[0m
+[0;32mI (31) boot: Multicore bootloader[0m
+[0;32mI (36) boot: chip revision: v3.1[0m
+[0;32mI (40) boot.esp32: SPI Speed      : 40MHz[0m
+[0;32mI (44) boot.esp32: SPI Mode       : DIO[0m
+[0;32mI (49) boot.esp32: SPI Flash Size : 2MB[0m
+[0;32mI (53) boot: Enabling RNG early entropy source...[0m
+[0;32mI (59) boot: Partition Table:[0m
+[0;32mI (62) boot: ## Label            Usage          Type ST Offset   Length[0m
+[0;32mI (70) boot:  0 nvs              WiFi data        01 02 00009000 00006000[0m
+[0;32mI (77) boot:  1 phy_init         RF data          01 01 0000f000 00001000[0m
+[0;32mI (85) boot:  2 factory          factory app      00 00 00010000 00100000[0m
+[0;32mI (92) boot: End of partition table[0m
+[0;32mI (96) esp_image: segment 0: paddr=00010020 vaddr=3f400020 size=0f6b4h ( 63156) map[0m
+[0;32mI (126) esp_image: segment 1: paddr=0001f6dc vaddr=3ffb0000 size=0093ch (  2364) load[0m
+[0;32mI (128) esp_image: segment 2: paddr=00020020 vaddr=400d0020 size=2614ch (155980) map[0m
+[0;32mI (186) esp_image: segment 3: paddr=00046174 vaddr=3ffb093c size=02040h (  8256) load[0m
+[0;32mI (189) esp_image: segment 4: paddr=000481bc vaddr=40080000 size=0e480h ( 58496) load[0m
+[0;32mI (222) boot: Loaded app from partition at offset 0x10000[0m
+[0;32mI (222) boot: Disabling RNG early entropy source...[0m
+[0;32mI (233) cpu_start: Multicore app[0m
+[0;32mI (242) cpu_start: Pro cpu start user code[0m
+[0;32mI (242) cpu_start: cpu freq: 160000000 Hz[0m
+[0;32mI (242) cpu_start: Application information:[0m
+[0;32mI (245) cpu_start: Project name:     keypad_lcd_demo[0m
+[0;32mI (251) cpu_start: App version:      1[0m
+[0;32mI (255) cpu_start: Compile time:     Mar 15 2025 15:13:00[0m
+[0;32mI (261) cpu_start: ELF file SHA256:  5f404e542...[0m
+[0;32mI (266) cpu_start: ESP-IDF:          v5.2.1-dirty[0m
+[0;32mI (272) cpu_start: Min chip rev:     v0.0[0m
+[0;32mI (277) cpu_start: Max chip rev:     v3.99 [0m
+[0;32mI (281) cpu_start: Chip rev:         v3.1[0m
+[0;32mI (286) heap_init: Initializing. RAM available for dynamic allocation:[0m
+[0;32mI (293) heap_init: At 3FFAE6E0 len 00001920 (6 KiB): DRAM[0m
+[0;32mI (299) heap_init: At 3FFB32D8 len 0002CD28 (179 KiB): DRAM[0m
+[0;32mI (306) heap_init: At 3FFE0440 len 00003AE0 (14 KiB): D/IRAM[0m
+[0;32mI (312) heap_init: At 3FFE4350 len 0001BCB0 (111 KiB): D/IRAM[0m
+[0;32mI (318) heap_init: At 4008E480 len 00011B80 (70 KiB): IRAM[0m
+[0;32mI (326) spi_flash: detected chip: generic[0m
+[0;32mI (329) spi_flash: flash io: dio[0m
+[0;33mW (333) spi_flash: Detected size(4096k) larger than the size in the binary image header(2048k). Using the size in the binary image header.[0m
+[0;33mW (346) i2c: This driver is an old driver, please migrate your application code to adapt `driver/i2c_master.h`[0m
+[0;32mI (358) main_task: Started on CPU0[0m
+[0;32mI (368) main_task: Calling app_main()[0m
+[0;32mI (368) Main: Starting application[0m
+[0;32mI (398) Main: NVS Flash initialized[0m
+[0;32mI (398) I2C: Initialized I2C on port 0, SDA: 21, SCL: 22[0m
+[0;32mI (398) LCD: Initializing LCD at address 0x27[0m
+[0;32mI (698) Keypad: Initialized keypad on I2C port 0, address 0x23[0m
+[0;32mI (698) RTC: Initializing DS1307 RTC[0m
+[0;32mI (708) RTC: DS1307 detected on I2C bus, control register: 0x00[0m
+[0;32mI (708) RTC: DS1307 clock is running normally[0m
+[0;32mI (708) RTC: DS1307 RTC initialized successfully, using hardware RTC[0m
+[0;32mI (708) RTC: Current time: 12:00:00, Date: 01/01/2023, Day: 1[0m
+[0;32mI (718) SplashTask: Took semaphore for splash screen[0m
+[0;32mI (728) Storage: Loading parameter 01.Time: from hardware RTC[0m
+[0;32mI (728) Main: Tasks created, entering idle[0m
+[0;32mI (738) RTC: Loaded time: 10:22[0m
+[0;32mI (738) Storage: Loading parameter 02.Date: from hardware RTC[0m
+[0;32mI (758) RTC: Loaded date: 17/03/25[0m
+[0;32mI (758) Storage: Loading parameter 03.Hi Volt: from EEPROM[0m
+[0;32mI (758) Keypad: Error loading from NVS. Default value 04.Lo Volt:: 180.0[0m
+[0;32mI (768) Keypad: Error loading from NVS. Default value 05.R-Low A:: 1.0[0m
+[0;32mI (768) Keypad: Error loading from NVS. Default value 06.Y-Low A:: 1.0[0m
+[0;32mI (778) Keypad: Error loading from NVS. Default value 07.B-Low A:: 1.0[0m
+[0;32mI (788) Keypad: Error loading from NVS. Default value 08.OC %:: 25[0m
+[0;32mI (788) Keypad: Error loading from NVS. Default value 09.Alarm:: 0[0m
+[0;32mI (798) Keypad: Error loading from NVS. Default value 10.Protect:: 0[0m
+[0;32mI (808) Keypad: Error loading from NVS. Default value 11.Rotate:: 0[0m
+[0;32mI (818) Keypad: Error loading from NVS. Default value 12.R On Tm:: 0000[0m
+[0;32mI (818) Keypad: Error loading from NVS. Default value 13.Y On Tm:: 0000[0m
+[0;32mI (828) Keypad: Error loading from NVS. Default value 14.B On Tm:: 0000[0m
+[0;32mI (838) Keypad: Error loading from NVS. Default value 15.R OffTm:: 0000[0m
+[0;32mI (838) Keypad: Error loading from NVS. Default value 16.Y OffTm:: 0000[0m
+[0;32mI (848) Keypad: Error loading from NVS. Default value 17.B OffTm:: 0000[0m
+[0;32mI (858) Keypad: Error loading from NVS. Default value 18.BackSet:: 0[0m
+[0;32mI (868) Keypad: Error loading from NVS. Default value 19.BackRise:: 0[0m
+[0;32mI (868) Keypad: Error loading from NVS. Default value 20.JanDusk:: 0000[0m
+[0;32mI (878) Keypad: Error loading from NVS. Default value 21.JanDawn:: 0000[0m
+[0;32mI (888) Keypad: Error loading from NVS. Default value 22.DecDusk:: 0000[0m
+[0;32mI (888) Keypad: Error loading from NVS. Default value 23.DecDawn:: 0000[0m
+[0;32mI (898) Keypad: Error loading from NVS. Default value 24.Password:: 00000000[0m
+[0;32mI (908) Keypad: Error loading from NVS. Default value 25.PassED:: 0[0m
+[0;32mI (2948) SplashTask: Released semaphore after splash screen[0m
+[0;32mI (17718) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (17808) Storage: Loading parameter 01.Time: from hardware RTC[0m
+[0;32mI (17818) RTC: Loaded time: 10:22[0m
+[0;32mI (30658) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (30968) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (32668) Keypad: Detected '*' (Raw: 0xE7)[0m
+[0;32mI (33648) Keypad: Detected '*' (Raw: 0xE7)[0m
+[0;32mI (34898) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (36488) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (43248) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (43788) Keypad: Detected '9' (Raw: 0xBB)[0m
+[0;32mI (46398) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (46398) Storage: Storing parameter 01.Time: to hardware RTC[0m
+[0;32mI (46408) RTC: Updated time to 10:19[0m
+[0;32mI (47668) Storage: Loading parameter 02.Date: from hardware RTC[0m
+[0;32mI (47678) RTC: Loaded date: 17/03/25[0m
+[0;32mI (53088) Keypad: Detected 'C' (Raw: 0x7B)[0m
+[0;32mI (53088) Storage: Loading parameter 01.Time: from hardware RTC[0m
+[0;32mI (53098) RTC: Loaded time: 10:20[0m
+[0;32mI (54198) Keypad: Detected 'C' (Raw: 0x7B)[0m
+[0;32mI (59668) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (62698) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (63968) Storage: Loading parameter 01.Time: from hardware RTC[0m
+[0;32mI (63978) RTC: Loaded time: 10:20[0m
+[0;32mI (69808) Keypad: Detected 'C' (Raw: 0x7B)[0m
+[0;32mI (71198) Keypad: Detected 'C' (Raw: 0x7B)[0m
+[0;32mI (77038) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (77988) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (81808) Keypad: Detected 'C' (Raw: 0x7B)[0m
+[0;32mI (87948) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (88618) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (88928) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (89408) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (91718) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (92198) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (92648) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (93218) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (94408) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (98668) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (100918) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (102958) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (104348) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (104798) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (105498) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (106588) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (107128) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (107518) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (107938) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (109558) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (113778) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (114938) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (115518) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (115998) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (116908) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (117378) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (117998) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (119318) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (126688) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (131058) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (131448) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (131798) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (133358) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (133788) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (134318) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (136828) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (138738) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (143638) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (148538) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (148888) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (149198) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (151048) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (152028) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (152598) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (154768) Keypad: Detected '0' (Raw: 0xD7)[0m
+[0;32mI (156818) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (163728) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (164608) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (164918) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (165308) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (165958) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (168208) Keypad: Detected '*' (Raw: 0xE7)[0m
+[0;32mI (168628) Keypad: Detected '*' (Raw: 0xE7)[0m
+[0;32mI (169678) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (170408) Keypad: Detected 'B' (Raw: 0x7D)[0m
+[0;32mI (171048) Keypad: Detected 'C' (Raw: 0x7B)[0m
+[0;32mI (171748) Keypad: Detected 'D' (Raw: 0x77)[0m
+[0;32mI (172558) Keypad: Detected 'D' (Raw: 0x77)[0m
+[0;32mI (173488) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (173798) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (174228) Keypad: Detected 'A' (Raw: 0x7E)[0m
+[0;32mI (175098) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (177508) Keypad: Detected '#' (Raw: 0xB7)[0m
+[0;32mI (372358) Keypad: Detected '1' (Raw: 0xEE)[0m
+[0;32mI (373748) Keypad: Detected '#' (Raw: 0xB7)[0m

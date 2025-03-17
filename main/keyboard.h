@@ -20,64 +20,99 @@ extern bool button_pressed;
 extern TickType_t button_timer;
 extern char pressed_character[2];
 
+// Parameter storage types
 typedef enum {
+    STORAGE_NVS,
+    STORAGE_RTC,
+    STORAGE_EEPROM
+} storage_type_t;
+
+// Parameter types
+typedef enum {
+    PARAM_TYPE_NUMBER,
+    PARAM_TYPE_DECIMAL,
     PARAM_TYPE_DATE,
     PARAM_TYPE_TIME,
-    PARAM_TYPE_NUMBER,
     PARAM_TYPE_ENABLE_DISABLE,
-    PARAM_TYPE_MULTIPLE
+    PARAM_TYPE_MULTIPLE,
+    PARAM_TYPE_PASSWORD
 } param_type_t;
 
+// Parameter groups
 typedef enum {
     GROUP_DATE_TIME,
     GROUP_PROTECTION,
     GROUP_STAGGERING,
-    GROUP_CIVIL_TWILIGHT
+    GROUP_CIVIL_TWILIGHT,
+    GROUP_SYSTEM
 } param_group_t;
 
-// Define storage types
+// Parameter format types
 typedef enum {
-    STORAGE_NVS,       // Store in ESP32 NVS
-    STORAGE_RTC,       // Store in DS1307 RTC
-    STORAGE_EEPROM     // Store in 24C32 EEPROM
-} storage_type_t;
+    FORMAT_NONE,
+    FORMAT_ENABLE_DISABLE,
+    FORMAT_DATE,
+    FORMAT_TIME,
+    FORMAT_DECIMAL,
+    FORMAT_MULTIPLE
+} param_format_t;
 
-typedef enum {
-    PARAM_ADDRESS_DATE,
-    PARAM_ADDRESS_TIME,    
-    PARAM_ADDRESS_3,
-    PARAM_ADDRESS_4,
-    PARAM_ADDRESS_5,
-    PARAM_ADDRESS_6,
-    PARAM_ADDRESS_7,
-    PARAM_ADDRESS_8,
-    PARAM_ADDRESS_9,
-    PARAM_ADDRESS_10,
-    PARAM_ADDRESS_11,
-    PARAM_ADDRESS_12,
-    PARAM_ADDRESS_13,
-    PARAM_ADDRESS_14,
-    PARAM_ADDRESS_15,
-    PARAM_ADDRESS_16,
-    PARAM_ADDRESS_17,
-    PARAM_ADDRESS_18,
-    PARAM_ADDRESS_19,
-    PARAM_ADDRESS_20,
-    PARAM_ADDRESS_21,
-    PARAM_ADDRESS_22,
-    PARAM_ADDRESS_23
-} param_address_t;
+// Parameter addresses
+#define PARAM_ADDRESS_TIME 1
+#define PARAM_ADDRESS_DATE 2
+#define PARAM_ADDRESS_3 3
+#define PARAM_ADDRESS_4 4
+#define PARAM_ADDRESS_5 5
+#define PARAM_ADDRESS_6 6
+#define PARAM_ADDRESS_7 7
+#define PARAM_ADDRESS_8 8
+#define PARAM_ADDRESS_9 9
+#define PARAM_ADDRESS_10 10
+#define PARAM_ADDRESS_11 11
+#define PARAM_ADDRESS_12 12
+#define PARAM_ADDRESS_13 13
+#define PARAM_ADDRESS_14 14
+#define PARAM_ADDRESS_15 15
+#define PARAM_ADDRESS_16 16
+#define PARAM_ADDRESS_17 17
+#define PARAM_ADDRESS_18 18
+#define PARAM_ADDRESS_19 19
+#define PARAM_ADDRESS_20 20
+#define PARAM_ADDRESS_21 21
+#define PARAM_ADDRESS_22 22
+#define PARAM_ADDRESS_23 23
+#define PARAM_ADDRESS_24 24
+#define PARAM_ADDRESS_25 25
 
+// Format validation rules
+typedef struct {
+    int min_length;           // Minimum length of input
+    int max_length;           // Maximum length of input
+    param_format_t format;     // Changed from char* to param_format_t
+    float min_value;          // Minimum value (for numeric types)
+    float max_value;          // Maximum value (for numeric types)
+    int decimal_places;       // Number of decimal places (for decimal types)
+    bool allow_negative;      // Whether negative numbers are allowed
+    int max_retries;          // Maximum number of retries (for password)
+    int lockout_time;         // Lockout time in seconds after max retries
+} param_validation_t;
+
+// Parameter structure
 typedef struct {
     const char *name;
     param_type_t type;
     param_group_t group;
-    storage_type_t storage;  // Added storage type
-    param_address_t address;
+    storage_type_t storage;
+    int address;
     void *value;
-    void *default_value;
+    const char *default_value;
     void (*validate)(void *value);
+    param_validation_t validation;  // New validation rules
 } parameter_t;
+
+// Add these before the function prototypes
+#define NUM_PARAMETERS 25
+#define NVS_NAMESPACE "params"
 
 // Function prototypes
 esp_err_t keypad_init(i2c_port_t i2c_port);
@@ -91,6 +126,8 @@ void validate_time(void *value);
 void validate_number(void *value);
 void validate_enable_disable(void *value);
 void validate_multiple(void *value);
+void validate_password(void *value);
+void validate_decimal(void *value);
 
 // Storage functions
 void store_parameters_to_nvs(void);

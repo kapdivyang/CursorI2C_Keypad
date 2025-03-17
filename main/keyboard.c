@@ -1,17 +1,144 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <driver/i2c.h>
+#include <driver/gpio.h>
 #include <esp_err.h>
 #include <nvs_flash.h>
 #include <nvs.h>
 #include <esp_log.h>
+#include <ctype.h>
+#include <time.h>
+#include <math.h>
 
 #include "keyboard.h"
 #include "lcd.h"
 
+#define FORMAT_NONE 0
+#define FORMAT_DECIMAL 1
+#define FORMAT_DATE 2
+#define FORMAT_TIME 3
+#define FORMAT_ENABLE_DISABLE 4
+#define FORMAT_MULTIPLE 5 // Added for multiple choice parameters
+
+#define MAX_PASSWORD_RETRIES 3 // Maximum number of password retry attempts
+
+// Forward declarations for static functions
+static esp_err_t ds1307_init(void);
+static uint8_t binary_to_bcd(uint8_t value);
+static uint8_t bcd_to_binary(uint8_t value);
+static esp_err_t ds1307_write(uint8_t reg_addr, uint8_t *data, size_t data_len);
+static esp_err_t ds1307_read(uint8_t reg_addr, uint8_t *data, size_t data_len);
+static esp_err_t eeprom_write(uint16_t addr, uint8_t *data, size_t data_len);
+static esp_err_t eeprom_read(uint16_t addr, uint8_t *data, size_t data_len);
+static esp_err_t write_pcf8574(uint8_t row_mask);
+static uint8_t read_pcf8574(uint8_t row_mask);
+static void format_input_according_to_rules(const char *input, char *output, const param_validation_t *rules);
+static bool check_password(const char *entered_password);
+static bool is_valid_date(const char *date_str);
+
+// Define keypad layout
+static const char keys[4][4] = {
+    {'1', '2', '3', 'A'}, // Row 1
+    {'4', '5', '6', 'B'}, // Row 2
+    {'7', '8', '9', 'C'}, // Row 3
+    {'*', '0', '#', 'D'}  // Row 4
+};
+
+// Define global variables for I2C
+i2c_port_t keypad_i2c_port;
+SemaphoreHandle_t i2c_semaphore;
+// Add extern declaration for lcd_semaphore
+extern SemaphoreHandle_t lcd_semaphore;
+bool button_pressed = false;
+TickType_t button_timer = 0;
+char pressed_character[2] = {0};
+
+// Add variables for inactivity timeout
+static TickType_t last_activity_time = 0;
+static const TickType_t INACTIVITY_TIMEOUT_MS = 15000; // 15 seconds timeout
+static TickType_t lockout_start = 0;
+static bool is_locked_out = false;
+
+// Add this with the other global constants
+// static const int MAX_PASSWORD_RETRIES = 3;
+
+// Parameters array - must be defined before functions that use it
+static parameter_t parameters[] = {
+    // Time parameters
+    {
+        .name = "01.Time:",
+        .type = PARAM_TYPE_TIME,
+        .group = GROUP_DATE_TIME,
+        .storage = STORAGE_RTC,
+        .address = PARAM_ADDRESS_TIME,
+        .value = NULL,
+        .default_value = "0000",
+        .validate = validate_time,
+        .validation = {
+            .min_length = 4,
+            .max_length = 4,
+            .format = FORMAT_TIME,
+            .min_value = 0,
+            .max_value = 2359,
+            .decimal_places = 0,
+            .allow_negative = false}},
+    // Date parameters
+    {.name = "02.Date:", .type = PARAM_TYPE_DATE, .group = GROUP_DATE_TIME, .storage = STORAGE_RTC, .address = PARAM_ADDRESS_DATE, .value = NULL, .default_value = "010123", .validate = validate_date, .validation = {.min_length = 6, .max_length = 6, .format = FORMAT_DATE, .min_value = 0, .max_value = 311299, .decimal_places = 0, .allow_negative = false}},
+    // High Voltage parameter
+    {.name = "03.Hi Volt:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_EEPROM, .address = PARAM_ADDRESS_3, .value = NULL, .default_value = "280.0", .validate = validate_decimal, .validation = {.min_length = 3, .max_length = 5, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 999.9, .decimal_places = 1, .allow_negative = false}},
+    // Low Voltage parameter
+    {.name = "04.Lo Volt:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_4, .value = NULL, .default_value = "180.0", .validate = validate_decimal, .validation = {.min_length = 3, .max_length = 5, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 999.9, .decimal_places = 1, .allow_negative = false}},
+    // R-Low A parameter
+    {.name = "05.R-Low A:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_5, .value = NULL, .default_value = "1.0", .validate = validate_decimal, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 9.9, .decimal_places = 1, .allow_negative = false}},
+    // Y-Low A parameter
+    {.name = "06.Y-Low A:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_6, .value = NULL, .default_value = "1.0", .validate = validate_decimal, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 9.9, .decimal_places = 1, .allow_negative = false}},
+    // B-Low A parameter
+    {.name = "07.B-Low A:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_7, .value = NULL, .default_value = "1.0", .validate = validate_decimal, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 9.9, .decimal_places = 1, .allow_negative = false}},
+    // OC % parameter
+    {.name = "08.OC %:", .type = PARAM_TYPE_NUMBER, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_8, .value = NULL, .default_value = "25", .validate = validate_number, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_NONE, .min_value = 0, .max_value = 999, .decimal_places = 0, .allow_negative = false}},
+    // Alarm parameter
+    {.name = "09.Alarm:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_9, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
+    // Protection parameter
+    {.name = "10.Protect:", .type = PARAM_TYPE_MULTIPLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_10, .value = NULL, .default_value = "0", .validate = validate_multiple, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_NONE, .min_value = 0, .max_value = 3, .decimal_places = 0, .allow_negative = false}},
+    // Rotate parameter
+    {.name = "11.Rotate:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_11, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
+    // R On Time parameter
+    {.name = "12.R On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_12, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // Y On Time parameter
+    {.name = "13.Y On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_13, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // B On Time parameter
+    {.name = "14.B On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_14, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // R Off Time parameter
+    {.name = "15.R OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_15, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // Y Off Time parameter
+    {.name = "16.Y OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_16, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // B Off Time parameter
+    {.name = "17.B OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_17, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // Back Set parameter
+    {.name = "18.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_NONE, .min_value = 0, .max_value = 9, .decimal_places = 0, .allow_negative = false}},
+    // Back Rise parameter
+    {.name = "19.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_NONE, .min_value = 0, .max_value = 9, .decimal_places = 0, .allow_negative = false}},
+    // January Dusk parameter
+    {.name = "20.JanDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // January Dawn parameter
+    {.name = "21.JanDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // December Dusk parameter
+    {.name = "22.DecDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // December Dawn parameter
+    {.name = "23.DecDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    // Password parameter
+    {.name = "24.Password:", .type = PARAM_TYPE_PASSWORD, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_24, .value = NULL, .default_value = "00000000", .validate = validate_password, .validation = {.min_length = 8, .max_length = 8, .format = FORMAT_NONE, .min_value = 0, .max_value = 0, .decimal_places = 0, .allow_negative = false, .max_retries = 3, .lockout_time = 15}},
+    // Password Enable/Disable parameter
+    {.name = "25.PassED:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_25, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}}};
+
+#define NVS_NAMESPACE "params"
+
+// I2C defines and flags
 #define I2C_PORT I2C_NUM_0
 #define PCF8574_ADDR 0x23 // Updated to match your test program
 #define LCD_ADDR 0x27     // Matches your test program
@@ -30,58 +157,6 @@ extern bool in_keyboard_mode;
 #define RTC_TIMEOUT_MS 50       // Shorter timeout for RTC detection
 #define RTC_READ_TIMEOUT_MS 250 // Longer timeout for RTC operations
 
-// Forward declarations for functions used before they're defined
-static esp_err_t eeprom_write(uint16_t addr, uint8_t *data, size_t data_len);
-static esp_err_t eeprom_read(uint16_t addr, uint8_t *data, size_t data_len);
-static esp_err_t ds1307_read(uint8_t reg_addr, uint8_t *data, size_t data_len);
-static esp_err_t ds1307_write(uint8_t reg_addr, uint8_t *data, size_t data_len);
-static uint8_t bcd_to_binary(uint8_t bcd);
-static uint8_t binary_to_bcd(uint8_t binary);
-static esp_err_t write_pcf8574(uint8_t row_mask);
-static uint8_t read_pcf8574(uint8_t row_mask);
-
-const char keys[4][4] = {
-    {'1', '2', '3', 'A'}, // Row 1
-    {'4', '5', '6', 'B'}, // Row 2
-    {'7', '8', '9', 'C'}, // Row 3
-    {'*', '0', '#', 'D'}  // Row 4
-};
-
-static parameter_t parameters[] = {
-    {"1.Time:", PARAM_TYPE_TIME, GROUP_DATE_TIME, STORAGE_RTC, PARAM_ADDRESS_TIME, NULL, "2359", validate_time},
-    {"2.Date:", PARAM_TYPE_DATE, GROUP_DATE_TIME, STORAGE_RTC, PARAM_ADDRESS_DATE, NULL, "280225", validate_date},
-    {"3.Hi Volt:", PARAM_TYPE_NUMBER, GROUP_PROTECTION, STORAGE_EEPROM, PARAM_ADDRESS_3, NULL, "280", validate_number},
-    {"4.Lo Volt:", PARAM_TYPE_NUMBER, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_4, NULL, "180", validate_number},
-    {"5.R-Low A:", PARAM_TYPE_NUMBER, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_5, NULL, "1", validate_number},
-    {"6.Y-Low A:", PARAM_TYPE_NUMBER, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_6, NULL, "1", validate_number},
-    {"7.B-Low A:", PARAM_TYPE_NUMBER, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_7, NULL, "1", validate_number},
-    {"8.OC %:", PARAM_TYPE_NUMBER, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_8, NULL, "25", validate_number},
-    {"9.Alarm:", PARAM_TYPE_ENABLE_DISABLE, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_9, NULL, "0", validate_enable_disable},
-    {"10.Protect:", PARAM_TYPE_MULTIPLE, GROUP_PROTECTION, STORAGE_NVS, PARAM_ADDRESS_10, NULL, "0", validate_multiple},
-    {"11.Rotate:", PARAM_TYPE_ENABLE_DISABLE, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_11, NULL, "0", validate_enable_disable},
-    {"12.R On Tm:", PARAM_TYPE_TIME, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_12, NULL, "0000", validate_time},
-    {"13.Y On Tm:", PARAM_TYPE_TIME, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_13, NULL, "0000", validate_time},
-    {"14.B On Tm:", PARAM_TYPE_TIME, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_14, NULL, "0000", validate_time},
-    {"15.R OffTm:", PARAM_TYPE_TIME, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_15, NULL, "0000", validate_time},
-    {"16.Y OffTm:", PARAM_TYPE_TIME, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_16, NULL, "0000", validate_time},
-    {"17.B OffTm:", PARAM_TYPE_TIME, GROUP_STAGGERING, STORAGE_NVS, PARAM_ADDRESS_17, NULL, "0000", validate_time},
-    {"18.BackSet:", PARAM_TYPE_NUMBER, GROUP_CIVIL_TWILIGHT, STORAGE_NVS, PARAM_ADDRESS_18, NULL, "0", validate_number},
-    {"19.BackRise:", PARAM_TYPE_NUMBER, GROUP_CIVIL_TWILIGHT, STORAGE_NVS, PARAM_ADDRESS_19, NULL, "0", validate_number},
-    {"20.JanDusk:", PARAM_TYPE_NUMBER, GROUP_CIVIL_TWILIGHT, STORAGE_NVS, PARAM_ADDRESS_20, NULL, "0", validate_number},
-    {"21.JanDawn:", PARAM_TYPE_NUMBER, GROUP_CIVIL_TWILIGHT, STORAGE_NVS, PARAM_ADDRESS_21, NULL, "0", validate_number},
-    {"22.DecDusk:", PARAM_TYPE_NUMBER, GROUP_CIVIL_TWILIGHT, STORAGE_NVS, PARAM_ADDRESS_22, NULL, "0", validate_number},
-    {"23.DecDawn:", PARAM_TYPE_NUMBER, GROUP_CIVIL_TWILIGHT, STORAGE_NVS, PARAM_ADDRESS_23, NULL, "0", validate_number}};
-#define NUM_PARAMETERS (sizeof(parameters) / sizeof(parameter_t))
-
-#define NVS_NAMESPACE "params"
-
-// Add these at the top of keyboard.c, after the includes
-i2c_port_t keypad_i2c_port;
-SemaphoreHandle_t i2c_semaphore;
-bool button_pressed = false;
-TickType_t button_timer = 0;
-char pressed_character[2] = {0};
-
 // static my_nvs_handle_t my_nvs_handle;
 static nvs_handle_t my_nvs_handle;
 
@@ -89,8 +164,17 @@ static nvs_handle_t my_nvs_handle;
 static bool rtc_present = false;
 static uint8_t simulated_rtc_registers[8] = {0}; // Simulated RTC registers when hardware isn't available
 
+// Add these global variables for password protection
+static int password_retries = 0;
+static bool is_authenticated = false;
+
+// Add these global variables at the top of the file with other globals
+static TickType_t cursor_last_toggle_time = 0;
+static bool cursor_visible = true;
+static const TickType_t CURSOR_BLINK_INTERVAL_MS = 500; // Blink every 500ms
+
 // This new function will handle the validation logic
-bool is_valid_date(const char *date_str)
+static bool is_valid_date(const char *date_str)
 {
     if (strlen(date_str) != 6)
     {
@@ -240,7 +324,8 @@ void format_date(const char *input, char *output, size_t output_size)
     snprintf(output, output_size, "%s/%s/%s", day, month, year);
 }
 
-static void format_time(char *input, char *output)
+// Completely rewrite format_time to handle all cases
+void format_time(char *input, char *output)
 {
     // Handle empty input
     if (!input || strlen(input) == 0)
@@ -249,38 +334,53 @@ static void format_time(char *input, char *output)
         return;
     }
 
-    // If already in HH:MM format, just copy
-    if (strlen(input) == 5 && input[2] == ':')
+    // Check if input already has the correct format with colon
+    if (strchr(input, ':') != NULL)
     {
         strcpy(output, input);
         return;
     }
 
-    // Convert from HHMM format to HH:MM format
-    // For partial inputs during editing, show as much as we have
-    if (strlen(input) < 4)
+    // Format based on input length
+    size_t len = strlen(input);
+    
+    if (len == 1)
     {
-        if (strlen(input) >= 2)
-        {
-            // We have hours, format as HH:
-            snprintf(output, 6, "%2.2s:", input);
-            if (strlen(input) == 3)
-            {
-                // We have one digit of minutes
-                output[3] = input[2];
-                output[4] = '\0';
-            }
-        }
-        else
-        {
-            // Just one digit, show as is
-            strcpy(output, input);
-        }
-        return;
+        // Single digit - just copy
+        strcpy(output, input);
     }
-
-    // Full HHMM format
-    snprintf(output, 6, "%2.2s:%2.2s", input, input + 2);
+    else if (len == 2)
+    {
+        // Two digits (hours only) - add colon
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = ':';
+        output[3] = '\0';
+    }
+    else if (len == 3)
+    {
+        // Three digits (hours + one minute digit)
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = ':';
+        output[3] = input[2];
+        output[4] = '\0';
+    }
+    else if (len == 4)
+    {
+        // Four digits (HHMM format)
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = ':';
+        output[3] = input[2];
+        output[4] = input[3];
+        output[5] = '\0';
+    }
+    else
+    {
+        // Unexpected format - just copy
+        strcpy(output, input);
+    }
 }
 
 void validate_time(void *value)
@@ -338,22 +438,23 @@ void validate_number(void *value)
         strcpy(num, "0");
 }
 
+// Modified validate_enable_disable to show "Enable"/"Disable" instead of 0/1
 void validate_enable_disable(void *value)
 {
     char *val = (char *)value;
+    if (!val)
+        return;
 
-    int selection = atoi(val);
-    switch (selection)
+    // If we're in edit mode and the value is a single digit
+    if (strlen(val) == 1 && (val[0] == '0' || val[0] == '1'))
     {
-    case 0:
+        // Convert to text format
+        strcpy(val, val[0] == '1' ? "Enable" : "Disable");
+    }
+    else if (strcmp(val, "Enable") != 0 && strcmp(val, "Disable") != 0)
+    {
+        // Invalid value, set to default
         strcpy(val, "Disable");
-        break;
-    case 1:
-        strcpy(val, "Enable");
-        break;
-    default:
-        strcpy(val, "Disable");
-        break;
     }
 }
 
@@ -886,6 +987,9 @@ esp_err_t store_parameter_to_rtc(int param_idx)
         ESP_LOGE("RTC", "Unknown RTC parameter: %s", parameters[param_idx].name);
         return ESP_ERR_INVALID_ARG;
     }
+
+    // This return is needed to avoid compiler warning
+    return ESP_OK;
 }
 
 // Load a parameter from RTC (DS1307)
@@ -1017,61 +1121,60 @@ esp_err_t load_parameter_from_rtc(int param_idx)
 // Store a parameter to EEPROM (24C32)
 esp_err_t store_parameter_to_eeprom(int param_idx)
 {
-    ESP_LOGI("Storage", "Storing parameter %s to EEPROM", parameters[param_idx].name);
-
-    // For this example, we'll only handle the "Hi Volt" parameter
-    if (parameters[param_idx].address == PARAM_ADDRESS_3)
+    if (param_idx < 0 || param_idx >= NUM_PARAMETERS || parameters[param_idx].value == NULL)
     {
-        char *value_str = (char *)parameters[param_idx].value;
-        uint16_t value = atoi(value_str);
-
-        // Store as a 16-bit value (2 bytes)
-        uint8_t data[2];
-        data[0] = (value >> 8) & 0xFF; // high byte
-        data[1] = value & 0xFF;        // low byte
-
-        return eeprom_write(EEPROM_HI_VOLT_ADDR, data, 2);
+        return ESP_ERR_INVALID_ARG;
     }
 
-    return ESP_FAIL;
+    ESP_LOGI("Storage", "Storing parameter %s to EEPROM", parameters[param_idx].name);
+
+    int address = parameters[param_idx].address;
+    const char *value = (const char *)parameters[param_idx].value;
+    int value_len = strlen(value) + 1; // Include null terminator
+
+    return eeprom_write(address, (uint8_t *)value, value_len);
 }
 
 // Load a parameter from EEPROM (24C32)
 esp_err_t load_parameter_from_eeprom(int param_idx)
 {
-    ESP_LOGI("Storage", "Loading parameter %s from EEPROM", parameters[param_idx].name);
-
-    // For this example, we'll only handle the "Hi Volt" parameter
-    // if (strcmp(parameters[param_idx].name, "Hi Volt:") == 0)
-    if (parameters[param_idx].address == PARAM_ADDRESS_3)
+    if (param_idx < 0 || param_idx >= NUM_PARAMETERS)
     {
-        uint8_t data[2];
-        esp_err_t ret = eeprom_read(EEPROM_HI_VOLT_ADDR, data, 2);
-        if (ret != ESP_OK)
-            return ret;
-
-        uint16_t value = (data[0] << 8) | data[1];
-
-        char *value_str = malloc(16); // Increased from 8 to 16 for safety
-        if (value_str == NULL)
-            return ESP_ERR_NO_MEM;
-
-        snprintf(value_str, 16, "%d", value);
-
-        // Free old value if it exists
-        if (parameters[param_idx].value != NULL)
-        {
-            free(parameters[param_idx].value);
-        }
-
-        parameters[param_idx].value = value_str;
-        parameters[param_idx].validate(value_str);
-        ESP_LOGI("EEPROM", "Loaded Hi Volt: %s", value_str);
-
-        return ESP_OK;
+        return ESP_ERR_INVALID_ARG;
     }
 
-    return ESP_FAIL;
+    ESP_LOGI("Storage", "Loading parameter %s from EEPROM", parameters[param_idx].name);
+
+    int address = parameters[param_idx].address;
+
+    // Allocate memory for parameter value if not already allocated
+    if (parameters[param_idx].value == NULL)
+    {
+        parameters[param_idx].value = malloc(32);
+        if (parameters[param_idx].value == NULL)
+        {
+            ESP_LOGE("Storage", "Failed to allocate memory for parameter value");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    // Read value from EEPROM
+    esp_err_t ret = eeprom_read(address, (uint8_t *)parameters[param_idx].value, 32);
+
+    // If read fails, use default value
+    if (ret != ESP_OK)
+    {
+        strcpy((char *)parameters[param_idx].value, parameters[param_idx].default_value);
+        ESP_LOGW("Storage", "Using default value for parameter %s", parameters[param_idx].name);
+    }
+
+    // Validate the parameter value
+    if (parameters[param_idx].validate != NULL)
+    {
+        parameters[param_idx].validate(parameters[param_idx].value);
+    }
+
+    return ESP_OK;
 }
 
 // Store a parameter to its designated storage
@@ -1156,7 +1259,7 @@ void store_all_parameters(void)
     }
 }
 
-// Load all parameters from their respective storage
+// Fix the load_all_parameters function to prioritize stored values over defaults
 void load_all_parameters(void)
 {
     // First load parameters from special storage (RTC, EEPROM)
@@ -1176,20 +1279,34 @@ void load_all_parameters(void)
         {
             size_t len = 16;
             char *value = malloc(len);
-            if (nvs_get_str(my_nvs_handle, parameters[i].name, value, &len) == ESP_OK)
+            esp_err_t err = nvs_get_str(my_nvs_handle, parameters[i].name, value, &len);
+            
+            if (err == ESP_OK)
             {
+                // Successfully loaded from NVS
                 parameters[i].value = value;
-                parameters[i].validate(value);
+                if (parameters[i].validate != NULL) {
+                    parameters[i].validate(value);
+                }
                 ESP_LOGI("Keypad", "Loaded %s: %s from NVS", parameters[i].name, value);
             }
             else
             {
+                // Failed to load from NVS, use default and store it
+                free(value); // Free the allocated memory since we're not using it
                 parameters[i].value = strdup((char *)parameters[i].default_value);
-                parameters[i].validate(parameters[i].value);
-                ESP_LOGI("Keypad", "Error loading from NVS. Default value %s: %s", parameters[i].name, (char *)parameters[i].default_value);
+                if (parameters[i].validate != NULL) {
+                    parameters[i].validate(parameters[i].value);
+                }
+                
+                // Store the default value to NVS
+                nvs_set_str(my_nvs_handle, parameters[i].name, parameters[i].value);
+                ESP_LOGI("Keypad", "Error loading from NVS. Default value %s: %s", 
+                         parameters[i].name, (char *)parameters[i].default_value);
             }
         }
     }
+    nvs_commit(my_nvs_handle);
     nvs_close(my_nvs_handle);
 }
 
@@ -1348,392 +1465,218 @@ void keyboard_task(void *pvParameters)
     char input[16] = {0};
     int param_idx = 0;
     int input_pos = 0;
+    bool password_mode = false;
+
+    // Initialize last activity time
+    last_activity_time = xTaskGetTickCount();
+    cursor_last_toggle_time = xTaskGetTickCount();
 
     // This variable is used throughout the function to track semaphore state
-    // It prevents double-freeing and ensures proper resource management
-    volatile bool semaphore_taken __attribute__((unused)) = false; // Marked as intentionally unused to suppress warning
+    volatile bool semaphore_taken __attribute__((unused)) = false;
 
     while (1)
     {
         char key = keypad_scan();
+        TickType_t current_time = xTaskGetTickCount();
+
+        // Check for cursor blink timing
+        bool should_update_cursor = false;
+        if (in_keyboard_mode && !password_mode && is_authenticated && 
+            ((current_time - cursor_last_toggle_time) * portTICK_PERIOD_MS >= CURSOR_BLINK_INTERVAL_MS))
+        {
+            cursor_visible = !cursor_visible;
+            cursor_last_toggle_time = current_time;
+            should_update_cursor = true;
+        }
+
+        // Update cursor display if needed and editing a parameter
+        if (should_update_cursor && input_pos > 0 && in_keyboard_mode && is_authenticated)
+        {
+            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+            {
+                semaphore_taken = true;
+                
+                // Format the current input with or without the cursor character
+                char display_input[32] = {0};
+                strcpy(display_input, input);
+                
+                // Get formatted version for display
+                char formatted_output[32] = {0};
+                format_input_according_to_rules(display_input, formatted_output, &parameters[param_idx].validation);
+                
+                // For blinking effect: replace the cursor position with a space or the actual character
+                int display_pos = input_pos;
+                
+                // For special formats, determine actual display position
+                if (parameters[param_idx].validation.format == FORMAT_TIME && input_pos >= 2)
+                {
+                    // Account for the colon in time display
+                    display_pos += 1;
+                }
+                else if (parameters[param_idx].validation.format == FORMAT_DATE && input_pos >= 2)
+                {
+                    // Account for slashes in date display
+                    if (input_pos >= 4)
+                        display_pos += 2; // Two slashes for positions 4+
+                    else
+                        display_pos += 1; // One slash for positions 2-3
+                }
+                
+                // Create a copy for display with blinking character
+                char display_with_cursor[32] = {0};
+                strcpy(display_with_cursor, formatted_output);
+                
+                if (!cursor_visible && display_pos < strlen(formatted_output))
+                {
+                    display_with_cursor[display_pos] = ' '; // Replace with space when cursor is invisible
+                }
+                
+                // Update display
+                lcd_set_cursor(1, 0);
+                lcd_print("Val: %s", display_with_cursor);
+                
+                xSemaphoreGive(lcd_semaphore);
+                semaphore_taken = false;
+            }
+        }
+
+        // Check for inactivity timeout
+        if (in_keyboard_mode &&
+            ((current_time - last_activity_time) * portTICK_PERIOD_MS >= INACTIVITY_TIMEOUT_MS))
+        {
+            // Timeout occurred - exit keyboard mode
+            in_keyboard_mode = false;
+            is_authenticated = false;
+            password_mode = false;
+            is_locked_out = false;
+
+            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+            {
+                semaphore_taken = true;
+                lcd_clear();
+                lcd_set_cursor(0, 0);
+                lcd_print("Timeout");
+                lcd_set_cursor(1, 0);
+                lcd_print("Returning to main");
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                xSemaphoreGive(lcd_semaphore);
+                semaphore_taken = false;
+            }
+
+            input_pos = 0;
+            memset(input, 0, sizeof(input));
+
+            // Reset last activity time
+            last_activity_time = xTaskGetTickCount();
+            continue;
+        }
+
+        // Handle lockout timer display updates
+        if (in_keyboard_mode && password_mode && is_locked_out)
+        {
+            TickType_t elapsed_seconds = ((current_time - lockout_start) * portTICK_PERIOD_MS) / 1000;
+            int remaining = parameters[23].validation.lockout_time - elapsed_seconds;
+
+            if (remaining <= 0)
+            {
+                // Lockout period is over
+                is_locked_out = false;
+                password_retries = 0;
+
+                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+                {
+                    semaphore_taken = true;
+                    lcd_clear();
+                    lcd_set_cursor(0, 0);
+                    lcd_print("Lockout ended");
+                    vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+                    // Return to password entry screen
+                    lcd_clear();
+                    lcd_set_cursor(0, 0);
+                    lcd_print("Enter Password:");
+                    lcd_set_cursor(1, 0);
+                    lcd_print(">");
+                    xSemaphoreGive(lcd_semaphore);
+                    semaphore_taken = false;
+                }
+            }
+            else if (remaining % 1 == 0)
+            { // Update every second
+                // Update the countdown timer
+                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+                {
+                    semaphore_taken = true;
+                    // Only update the remaining time display
+                    lcd_set_cursor(0, 0);
+                    lcd_print("Locked: %ds     ", remaining);
+                    xSemaphoreGive(lcd_semaphore);
+                    semaphore_taken = false;
+                }
+            }
+        }
+
         if (key != '\0')
         {
+            // Update last activity time when a key is pressed
+            last_activity_time = xTaskGetTickCount();
+
             if (!in_keyboard_mode && key == 'A')
             {
+                // Check if password protection is enabled - fixed to use parameter 24 (PassED)
+                bool password_enabled = false;
+
+                // Find parameter 24.PassED
+                for (int i = 0; i < NUM_PARAMETERS; i++)
+                {
+                    if (strstr(parameters[i].name, "PassED") != NULL)
+                    {
+                        // Check if password is enabled (value is "1" or "Enable")
+                        if (parameters[i].value != NULL &&
+                            (strcmp(parameters[i].value, "1") == 0 ||
+                             strcmp(parameters[i].value, "Enable") == 0))
+                        {
+                            password_enabled = true;
+                        }
+                        break;
+                    }
+                }
+
                 in_keyboard_mode = true;
+                password_mode = password_enabled;
+
                 if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
                 {
                     semaphore_taken = true;
-
-                    // Reload parameter from storage to get latest value
-                    if (parameters[param_idx].storage == STORAGE_RTC)
-                    {
-                        load_parameter_from_rtc(param_idx);
-                    }
-                    else if (parameters[param_idx].storage == STORAGE_EEPROM)
-                    {
-                        load_parameter_from_eeprom(param_idx);
-                    }
-
                     lcd_clear();
-                    lcd_set_cursor(0, 0);
-                    lcd_print("%s", parameters[param_idx].name);
-                    lcd_set_cursor(1, 0);
-                    if (parameters[param_idx].type == PARAM_TYPE_DATE)
+
+                    if (password_enabled)
                     {
-                        char formatted_date[9] = {0};
-                        if (parameters[param_idx].value != NULL)
-                        {
-                            format_date((char *)parameters[param_idx].value, formatted_date, sizeof(formatted_date));
-                            lcd_print("Val: %s", formatted_date);
-                        }
-                        else
-                        {
-                            lcd_print("Val: 01/01/23");
-                        }
-                    }
-                    else if (parameters[param_idx].type == PARAM_TYPE_TIME)
-                    {
-                        char formatted_time[6] = {0};
-                        if (parameters[param_idx].value != NULL)
-                        {
-                            // The value should already be in HH:MM format after validation
-                            strcpy(formatted_time, (char *)parameters[param_idx].value);
-                            lcd_print("Val: %s", formatted_time);
-                        }
-                        else
-                        {
-                            lcd_print("Val: 00:00");
-                        }
+                        lcd_set_cursor(0, 0);
+                        lcd_print("Enter Password:");
+                        lcd_set_cursor(1, 0);
+                        lcd_print(">");
                     }
                     else
                     {
-                        lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                    }
-                    xSemaphoreGive(lcd_semaphore);
-                    semaphore_taken = false;
-                }
-            }
-            else if (in_keyboard_mode && key == 'A')
-            {
-                in_keyboard_mode = false;
-                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-                {
-                    semaphore_taken = true;
-                    lcd_clear();
-                    lcd_set_cursor(0, 0);
-                    lcd_print("Exit Mode");
-                    vTaskDelay(1000 / portTICK_PERIOD_MS);
-                    xSemaphoreGive(lcd_semaphore);
-                    semaphore_taken = false;
-                }
-                input_pos = 0;
-                memset(input, 0, sizeof(input));
-            }
-            else if (in_keyboard_mode && key == 'B')
-            {
-                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-                {
-                    semaphore_taken = true;
-                    // Safely navigate to next parameter
-                    if (param_idx >= (NUM_PARAMETERS - 1))
+                        is_authenticated = true;
                         param_idx = 0;
-                    else
-                        param_idx = param_idx + 1;
-
-                    // Reload parameter from storage to get latest value
-                    if (parameters[param_idx].storage == STORAGE_RTC)
-                    {
-                        load_parameter_from_rtc(param_idx);
-                    }
-                    else if (parameters[param_idx].storage == STORAGE_EEPROM)
-                    {
-                        load_parameter_from_eeprom(param_idx);
-                    }
-
-                    lcd_clear();
-                    lcd_set_cursor(0, 0);
-                    // Make sure parameter name is valid before printing
-                    if (parameters[param_idx].name != NULL)
-                    {
+                        lcd_set_cursor(0, 0);
                         lcd_print("%s", parameters[param_idx].name);
-                    }
-                    else
-                    {
-                        lcd_print("Unknown param");
-                    }
+                        lcd_set_cursor(1, 0);
 
-                    lcd_set_cursor(1, 0);
-                    // Make sure parameter value exists and validation function exists
-                    if (parameters[param_idx].value != NULL && parameters[param_idx].validate != NULL)
-                    {
-                        if (parameters[param_idx].type == PARAM_TYPE_DATE)
-                        {
-                            char formatted_date[9];
-                            format_date((char *)parameters[param_idx].value, formatted_date, sizeof(formatted_date));
-                            lcd_print("Val: %s", formatted_date);
-                        }
-                        else if (parameters[param_idx].type == PARAM_TYPE_TIME)
-                        {
-                            // Time value should already be in HH:MM format
-                            lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                        }
-                        else
-                        {
-                            lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                        }
-                    }
-                    else
-                    {
-                        lcd_print("Val: <error>");
-                    }
-                    xSemaphoreGive(lcd_semaphore);
-                    semaphore_taken = false;
-
-                    // Reset input state when changing parameters
-                    input_pos = 0;
-                    memset(input, 0, sizeof(input));
-                }
-            }
-            else if (in_keyboard_mode && key == 'C')
-            {
-                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-                {
-                    semaphore_taken = true;
-                    // Safely navigate to previous parameter
-                    if (param_idx <= 0)
-                        param_idx = NUM_PARAMETERS - 1;
-                    else
-                        param_idx = param_idx - 1;
-
-                    // Reload parameter from storage to get latest value
-                    if (parameters[param_idx].storage == STORAGE_RTC)
-                    {
-                        load_parameter_from_rtc(param_idx);
-                    }
-                    else if (parameters[param_idx].storage == STORAGE_EEPROM)
-                    {
-                        load_parameter_from_eeprom(param_idx);
-                    }
-
-                    lcd_clear();
-                    lcd_set_cursor(0, 0);
-                    // Make sure parameter name is valid before printing
-                    if (parameters[param_idx].name != NULL)
-                    {
-                        lcd_print("%s", parameters[param_idx].name);
-                    }
-                    else
-                    {
-                        lcd_print("Unknown param");
-                    }
-
-                    lcd_set_cursor(1, 0);
-                    // Make sure parameter value exists and validation function exists
-                    if (parameters[param_idx].value != NULL && parameters[param_idx].validate != NULL)
-                    {
-                        if (parameters[param_idx].type == PARAM_TYPE_DATE)
-                        {
-                            char formatted_date[9];
-                            format_date((char *)parameters[param_idx].value, formatted_date, sizeof(formatted_date));
-                            lcd_print("Val: %s", formatted_date);
-                        }
-                        else if (parameters[param_idx].type == PARAM_TYPE_TIME)
-                        {
-                            char formatted_time[6];
-                            format_time((char *)parameters[param_idx].value, formatted_time);
-                            lcd_print("Val: %s", formatted_time);
-                        }
-                        else
-                        {
-                            lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                        }
-                    }
-                    else
-                    {
-                        lcd_print("Val: <error>");
-                    }
-                    xSemaphoreGive(lcd_semaphore);
-                    semaphore_taken = false;
-
-                    // Reset input state when changing parameters
-                    input_pos = 0;
-                    memset(input, 0, sizeof(input));
-                }
-            }
-            else if (in_keyboard_mode && key == '#')
-            {
-                if (input_pos > 0)
-                {
-                    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-                    {
-                        semaphore_taken = true;
-
-                        // Free previous value if exists
+                        // Format and display the current value
                         if (parameters[param_idx].value != NULL)
                         {
-                            free(parameters[param_idx].value);
-                        }
-
-                        // For time parameters, we need to store in HHMM format initially
-                        // The validation function will convert to HH:MM format
-                        parameters[param_idx].value = strdup(input);
-
-                        // Validate will ensure correct format for storage
-                        parameters[param_idx].validate(parameters[param_idx].value);
-                        store_parameter(param_idx);
-
-                        // Display the updated value after storing it
-                        lcd_clear();
-                        lcd_set_cursor(0, 0);
-                        lcd_print("%s", parameters[param_idx].name);
-                        lcd_set_cursor(1, 0);
-
-                        if (parameters[param_idx].type == PARAM_TYPE_DATE)
-                        {
-                            char formatted_date[9] = {0};
-                            format_date((char *)parameters[param_idx].value, formatted_date, sizeof(formatted_date));
-                            lcd_print("Val: %s", formatted_date);
-                        }
-                        else if (parameters[param_idx].type == PARAM_TYPE_TIME)
-                        {
-                            // After validation, the value should be in HH:MM format
-                            lcd_print("Val: %s", (char *)parameters[param_idx].value);
+                            char formatted_output[32] = {0};
+                            format_input_according_to_rules(
+                                (char *)parameters[param_idx].value,
+                                formatted_output,
+                                &parameters[param_idx].validation);
+                            lcd_print("Val: %s", formatted_output);
                         }
                         else
                         {
-                            lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                        }
-
-                        // Show "Saved" message
-                        lcd_set_cursor(0, 12);
-                        lcd_print("Saved");
-                        
-                        // Delay to show the saved value before moving to next parameter
-                        vTaskDelay(1000 / portTICK_PERIOD_MS);
-                        
-                        // Move to next parameter
-                        param_idx = (param_idx + 1) % NUM_PARAMETERS;
-                        
-                        // Load the next parameter data
-                        if (parameters[param_idx].storage == STORAGE_RTC) {
-                            load_parameter_from_rtc(param_idx);
-                        } else if (parameters[param_idx].storage == STORAGE_EEPROM) {
-                            load_parameter_from_eeprom(param_idx);
-                        }
-                        
-                        // Display the next parameter
-                        lcd_clear();
-                        lcd_set_cursor(0, 0);
-                        lcd_print("%s", parameters[param_idx].name);
-                        lcd_set_cursor(1, 0);
-                        
-                        // Display the value based on parameter type
-                        if (parameters[param_idx].value != NULL && parameters[param_idx].validate != NULL) {
-                            if (parameters[param_idx].type == PARAM_TYPE_DATE) {
-                                char formatted_date[9] = {0};
-                                format_date((char *)parameters[param_idx].value, formatted_date, sizeof(formatted_date));
-                                lcd_print("Val: %s", formatted_date);
-                            } else if (parameters[param_idx].type == PARAM_TYPE_TIME) {
-                                // Time value should already be in HH:MM format
-                                lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                            } else {
-                                lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                            }
-                        } else {
-                            lcd_print("Val: <error>");
-                        }
-                        
-                        // Reset input state for next edits
-                        input_pos = 0;
-                        memset(input, 0, sizeof(input));
-
-                        xSemaphoreGive(lcd_semaphore);
-                        semaphore_taken = false;
-                    }
-                }
-            }
-            else if (in_keyboard_mode)
-            {
-                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-                {
-                    semaphore_taken = true;
-                    
-                    // Only start editing mode if input is empty and a digit key is pressed
-                    if (input_pos == 0 && key >= '0' && key <= '9') {
-                        // First clear the screen and show editing mode
-                        lcd_clear();
-                        lcd_set_cursor(0, 0);
-                        lcd_print("%s !Edit!", parameters[param_idx].name);
-                    } else if (input_pos > 0) {
-                        // Already in editing mode, update the display
-                        lcd_clear();
-                        lcd_set_cursor(0, 0);
-                        lcd_print("%s !Edit!", parameters[param_idx].name);
-                    }
-                    lcd_set_cursor(1, 0);
-
-                    if (key >= '0' && key <= '9')
-                    {
-                        int max_len = (parameters[param_idx].type == PARAM_TYPE_DATE) ? 6 : (parameters[param_idx].type == PARAM_TYPE_TIME) ? 4 : 15;
-                        if (input_pos < max_len)
-                        {
-                            input[input_pos++] = key;
-                            input[input_pos] = '\0';
-                        }
-                    }
-                    else if (key == '*')
-                    {
-                        if (input_pos > 0)
-                            input[--input_pos] = '\0';
-                    }
-
-                    lcd_set_cursor(1, 0);
-                    if (input_pos > 0) {
-                        // Only format and show the input if we've entered something
-                        if (parameters[param_idx].type == PARAM_TYPE_DATE)
-                        {
-                            char formatted_date[9] = {0};
-                            format_date(input, formatted_date, sizeof(formatted_date));
-                            lcd_print("Val: %s", formatted_date);
-                        }
-                        else if (parameters[param_idx].type == PARAM_TYPE_TIME)
-                        {
-                            char formatted_time[6] = {0};
-                            // Convert HHMM to HH:MM for display only
-                            format_time(input, formatted_time);
-                            lcd_print("Val: %s", formatted_time);
-                        }
-                        else
-                        {
-                            lcd_print("Val: %s", input);
-                        }
-                    } else if (key >= '0' && key <= '9') {
-                        // Just started editing with a digit
-                        if (parameters[param_idx].type == PARAM_TYPE_DATE) {
-                            char formatted_date[9] = {0};
-                            format_date(input, formatted_date, sizeof(formatted_date));
-                            lcd_print("Val: %s", formatted_date);
-                        } else if (parameters[param_idx].type == PARAM_TYPE_TIME) {
-                            char formatted_time[6] = {0};
-                            format_time(input, formatted_time);
-                            lcd_print("Val: %s", formatted_time);
-                        } else {
-                            lcd_print("Val: %s", input);
-                        }
-                    } else {
-                        // Not editing yet, show current parameter value
-                        if (parameters[param_idx].value != NULL) {
-                            if (parameters[param_idx].type == PARAM_TYPE_DATE) {
-                                char formatted_date[9] = {0};
-                                format_date((char *)parameters[param_idx].value, formatted_date, sizeof(formatted_date));
-                                lcd_print("Val: %s", formatted_date);
-                            } else if (parameters[param_idx].type == PARAM_TYPE_TIME) {
-                                lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                            } else {
-                                lcd_print("Val: %s", (char *)parameters[param_idx].value);
-                            }
-                        } else {
                             lcd_print("Val: <none>");
                         }
                     }
@@ -1741,15 +1684,345 @@ void keyboard_task(void *pvParameters)
                     xSemaphoreGive(lcd_semaphore);
                     semaphore_taken = false;
                 }
+
+                input_pos = 0;
+                memset(input, 0, sizeof(input));
             }
-        }
-        else
-        {
-            if (!in_keyboard_mode)
+            else if (in_keyboard_mode)
             {
-                vTaskDelay(100 / portTICK_PERIOD_MS);
+                if (password_mode && !is_authenticated)
+                {
+                    // Handle password mode
+                    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+                    {
+                        semaphore_taken = true;
+
+                        if (is_locked_out)
+                        {
+                            // Display lockout message and countdown
+                            TickType_t current_time = xTaskGetTickCount();
+                            int elapsed_seconds = ((current_time - lockout_start) * portTICK_PERIOD_MS) / 1000;
+                            int remaining = parameters[23].validation.lockout_time - elapsed_seconds;
+
+                            lcd_clear();
+                            lcd_set_cursor(0, 0);
+                            lcd_print("Locked: %ds", remaining);
+                            lcd_set_cursor(1, 0);
+                            lcd_print("Please wait...");
+                        }
+                        else if (key >= '0' && key <= '9')
+                        {
+                            // Handle digit entry for password
+                            if (input_pos < 8) // Assume max password length is 8
+                            {
+                                input[input_pos++] = key;
+                                input[input_pos] = '\0';
+
+                                // Update display with asterisks for password
+                                lcd_set_cursor(1, 0);
+                                lcd_print(">%s", input);
+                            }
+                        }
+                        else if (key == 'D') // Delete
+                        {
+                            if (input_pos > 0)
+                            {
+                                input[--input_pos] = '\0';
+                                
+                                // Update display
+                                lcd_set_cursor(1, 0);
+                                lcd_print(">%s ", input); // Space to clear last character
+                            }
+                        }
+                        else if (key == '#') // Submit password
+                        {
+                            if (check_password(input))
+                            {
+                                // Password correct
+                                is_authenticated = true;
+                                password_mode = false;
+                                password_retries = 0;
+                                
+                                lcd_clear();
+                                lcd_set_cursor(0, 0);
+                                lcd_print("Access Granted");
+                                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                                
+                                // Show first parameter
+                                param_idx = 0;
+                                lcd_clear();
+                                lcd_set_cursor(0, 0);
+                                lcd_print("%s", parameters[param_idx].name);
+                                lcd_set_cursor(1, 0);
+                                
+                                // Format and display current value
+                                if (parameters[param_idx].value != NULL)
+                                {
+                                    char formatted_output[32] = {0};
+                                    format_input_according_to_rules(
+                                        (char *)parameters[param_idx].value,
+                                        formatted_output,
+                                        &parameters[param_idx].validation);
+                                    lcd_print("Val: %s", formatted_output);
+                                }
+                                else
+                                {
+                                    lcd_print("Val: <none>");
+                                }
+                            }
+                            else
+                            {
+                                // Password incorrect
+                                password_retries++;
+                                
+                                if (password_retries >= MAX_PASSWORD_RETRIES)
+                                {
+                                    // Max retries reached, activate lockout
+                                    is_locked_out = true;
+                                    lockout_start = xTaskGetTickCount();
+                                    
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("Max retries");
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Locked for %ds", parameters[23].validation.lockout_time);
+                                }
+                                else
+                                {
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("Wrong Password!");
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Retry %d/%d", password_retries, MAX_PASSWORD_RETRIES);
+                                    vTaskDelay(1500 / portTICK_PERIOD_MS);
+                                    
+                                    // Reset for next attempt
+                                    lcd_clear();
+                                    lcd_set_cursor(0, 0);
+                                    lcd_print("Enter Password:");
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print(">");
+                                }
+                                
+                                // Clear input for next attempt
+                                memset(input, 0, sizeof(input));
+                                input_pos = 0;
+                            }
+                        }
+                        else if (key == 'A')
+                        {
+                            // Exit password mode
+                            in_keyboard_mode = false;
+                            password_mode = false;
+                            lcd_clear();
+                        }
+
+                        xSemaphoreGive(lcd_semaphore);
+                        semaphore_taken = false;
+                    }
+                }
+                else if (is_authenticated)
+                {
+                    // Regular parameter editing mode
+                    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+                    {
+                        semaphore_taken = true;
+                        
+                        if (key == 'A') // Changed: Use A to exit keyboard mode instead of navigating
+                        {
+                            // Exit keyboard mode
+                            in_keyboard_mode = false;
+                            is_authenticated = false;
+                            lcd_clear();
+                        }
+                        else if (key == 'B') // Previous parameter
+                        {
+                            if (param_idx > 0)
+                                param_idx--;
+                            else
+                                param_idx = NUM_PARAMETERS - 1;
+                                
+                            // Display new parameter
+                            lcd_clear();
+                            lcd_set_cursor(0, 0);
+                            lcd_print("%s", parameters[param_idx].name);
+                            lcd_set_cursor(1, 0);
+                            
+                            // Format and display current value
+                            if (parameters[param_idx].value != NULL)
+                            {
+                                char formatted_output[32] = {0};
+                                format_input_according_to_rules(
+                                    (char *)parameters[param_idx].value, 
+                                    formatted_output,
+                                    &parameters[param_idx].validation);
+                                lcd_print("Val: %s", formatted_output);
+                            }
+                            else
+                            {
+                                lcd_print("Val: <none>");
+                            }
+                            
+                            // Reset input
+                            memset(input, 0, sizeof(input));
+                            input_pos = 0;
+                        }
+                        else if (key == 'C') // Next parameter (changed from exit to next)
+                        {
+                            param_idx = (param_idx + 1) % NUM_PARAMETERS;
+                            
+                            // Display new parameter
+                            lcd_clear();
+                            lcd_set_cursor(0, 0);
+                            lcd_print("%s", parameters[param_idx].name);
+                            lcd_set_cursor(1, 0);
+                            
+                            // Format and display current value
+                            if (parameters[param_idx].value != NULL)
+                            {
+                                char formatted_output[32] = {0};
+                                format_input_according_to_rules(
+                                    (char *)parameters[param_idx].value, 
+                                    formatted_output,
+                                    &parameters[param_idx].validation);
+                                lcd_print("Val: %s", formatted_output);
+                            }
+                            else
+                            {
+                                lcd_print("Val: <none>");
+                            }
+                            
+                            // Reset input
+                            memset(input, 0, sizeof(input));
+                            input_pos = 0;
+                        }
+                        else if (key == 'D') // Delete character
+                        {
+                            if (input_pos > 0)
+                            {
+                                input[--input_pos] = '\0';
+                                
+                                // Update display
+                                lcd_set_cursor(1, 0);
+                                lcd_print("Val: %s ", input); // Space to clear last character
+                            }
+                        }
+                        else if (key == '*') // Decimal point for decimal parameters
+                        {
+                            if (parameters[param_idx].validation.format == FORMAT_DECIMAL)
+                            {
+                                // Only add decimal if we haven't already added one
+                                bool has_decimal = false;
+                                for (int i = 0; i < input_pos; i++)
+                                {
+                                    if (input[i] == '.')
+                                    {
+                                        has_decimal = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!has_decimal && input_pos < parameters[param_idx].validation.max_length)
+                                {
+                                    input[input_pos++] = '.';
+                                    input[input_pos] = '\0';
+                                    
+                                    // Update display
+                                    lcd_set_cursor(1, 0);
+                                    lcd_print("Val: %s", input);
+                                }
+                            }
+                        }
+                        else if (key >= '0' && key <= '9') // Number input
+                        {
+                            if (input_pos < parameters[param_idx].validation.max_length)
+                            {
+                                input[input_pos++] = key;
+                                input[input_pos] = '\0';
+                                
+                                // Reset cursor state
+                                cursor_visible = true;
+                                cursor_last_toggle_time = current_time;
+                                
+                                // Format and display input
+                                char formatted_output[32] = {0};
+                                format_input_according_to_rules(
+                                    input, 
+                                    formatted_output,
+                                    &parameters[param_idx].validation);
+                                
+                                lcd_set_cursor(1, 0);
+                                lcd_print("Val: %s", formatted_output);
+                            }
+                        }
+                        else if (key == '#') // Submit value
+                        {
+                            if (input_pos > 0)
+                            {
+                                // For time parameters, convert HHMM to standard format
+                                if (parameters[param_idx].type == PARAM_TYPE_TIME && strlen(input) == 4)
+                                {
+                                    // Convert from HHMM to HH:MM - fixed to avoid double colon
+                                    char formatted_time[6]; // HH:MM + null
+                                    snprintf(formatted_time, 6, "%c%c:%c%c", 
+                                             input[0], input[1], input[2], input[3]);
+                                    strcpy(input, formatted_time);
+                                }
+                                
+                                // Free old value if exists
+                                if (parameters[param_idx].value != NULL)
+                                {
+                                    free(parameters[param_idx].value);
+                                }
+                                
+                                // Set new value
+                                parameters[param_idx].value = strdup(input);
+                                
+                                // Validate and store
+                                if (parameters[param_idx].validate != NULL)
+                                {
+                                    parameters[param_idx].validate(parameters[param_idx].value);
+                                }
+                                
+                                store_parameter(param_idx);
+                                
+                                // Format and display the updated value
+                                char formatted_output[32] = {0};
+                                format_input_according_to_rules(
+                                    (char *)parameters[param_idx].value, 
+                                    formatted_output,
+                                    &parameters[param_idx].validation);
+                                
+                                // Show confirmation
+                                lcd_clear();
+                                lcd_set_cursor(0, 0);
+                                lcd_print("Value saved!");
+                                lcd_set_cursor(1, 0);
+                                lcd_print("%s", formatted_output);
+                                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                                
+                                // Show parameter again
+                                lcd_clear();
+                                lcd_set_cursor(0, 0);
+                                lcd_print("%s", parameters[param_idx].name);
+                                lcd_set_cursor(1, 0);
+                                lcd_print("Val: %s", formatted_output);
+                            }
+                            
+                            // Reset input
+                            memset(input, 0, sizeof(input));
+                            input_pos = 0;
+                        }
+
+                        xSemaphoreGive(lcd_semaphore);
+                        semaphore_taken = false;
+                    }
+                }
             }
         }
+        
+        // Small delay to prevent high CPU usage
+        vTaskDelay(50 / portTICK_PERIOD_MS);
     }
 }
 
@@ -1885,4 +2158,177 @@ static uint8_t read_pcf8574(uint8_t row_mask)
 
     // ESP_LOGI("Keypad", "Row mask 0x%02X, data: 0x%02X (%d)", row_mask, data, data);
     return data;
+}
+
+// Update format_input_according_to_rules to properly handle time formatting
+static void format_input_according_to_rules(const char *input, char *output, const param_validation_t *rules)
+{
+    if (!input || !output || !rules)
+    {
+        if (output)
+            output[0] = '\0';
+        return;
+    }
+
+    // Reset output
+    output[0] = '\0';
+
+    // Format according to type
+    switch (rules->format)
+    {
+        case FORMAT_ENABLE_DISABLE:
+            if (strcmp(input, "1") == 0 || strcmp(input, "Enable") == 0)
+                strcpy(output, "Enable");
+            else if (strcmp(input, "0") == 0 || strcmp(input, "Disable") == 0)
+                strcpy(output, "Disable");
+            else
+                strcpy(output, input);
+            break;
+
+        case FORMAT_DATE:
+            if (strlen(input) > 0)
+            {
+                format_date(input, output, 32);
+            }
+            else
+            {
+                strcpy(output, input);
+            }
+            break;
+
+        case FORMAT_TIME:
+            if (strlen(input) > 0)
+            {
+                // Directly use our new format_time function
+                char formatted_time[10] = {0};
+                format_time((char *)input, formatted_time);
+                strcpy(output, formatted_time);
+            }
+            else
+            {
+                strcpy(output, "");
+            }
+            break;
+
+        case FORMAT_DECIMAL:
+            // This is handled by validate_decimal
+            strcpy(output, input);
+            break;
+
+        case FORMAT_MULTIPLE:
+            // This is for parameters with multiple options
+            strcpy(output, input);
+            break;
+
+        default:
+            // For other formats, just copy
+            strcpy(output, input);
+            break;
+    }
+}
+
+// Keep only one definition of validate_enable_disable (the original one)
+// Remove the duplicate definition
+
+// Keep only the static version of check_password
+static bool check_password(const char *entered_password)
+{
+    if (entered_password == NULL)
+    {
+        return false;
+    }
+
+    // Find the password parameter
+    const char *stored_password = NULL;
+    for (int i = 0; i < NUM_PARAMETERS; i++)
+    {
+        if (strstr(parameters[i].name, "Password") != NULL)
+        {
+            stored_password = (const char *)parameters[i].value;
+            break;
+        }
+    }
+
+    // If no password is set, or password doesn't match
+    if (stored_password == NULL || strcmp(entered_password, stored_password) != 0)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+void validate_decimal(void *value)
+{
+    char *val_str = (char *)value;
+    if (!val_str)
+        return;
+
+    // Find the parameter this value belongs to
+    parameter_t *param = NULL;
+    for (int i = 0; i < NUM_PARAMETERS; i++)
+    {
+        if (parameters[i].value == value)
+        {
+            param = &parameters[i];
+            break;
+        }
+    }
+    if (!param)
+        return;
+
+    // Parse the decimal value
+    double val = atof(val_str);
+
+    // Check range
+    if (val < param->validation.min_value || val > param->validation.max_value)
+    {
+        // Reset to default value
+        strcpy(val_str, param->default_value);
+        return;
+    }
+
+    // Format according to decimal places
+    char format[10];
+    snprintf(format, sizeof(format), "%%.%df", param->validation.decimal_places);
+    char temp[32];
+    snprintf(temp, sizeof(temp), format, val);
+    strcpy(val_str, temp);
+}
+
+void validate_password(void *value)
+{
+    char *password = (char *)value;
+    if (!password)
+        return;
+
+    // Find the password parameter
+    parameter_t *param = NULL;
+    for (int i = 0; i < NUM_PARAMETERS; i++)
+    {
+        if (parameters[i].type == PARAM_TYPE_PASSWORD)
+        {
+            param = &parameters[i];
+            break;
+        }
+    }
+    if (!param)
+        return;
+
+    // Check length
+    if (strlen(password) != param->validation.max_length)
+    {
+        strcpy(password, param->default_value);
+        return;
+    }
+
+    // Check if all characters are digits
+    for (int i = 0; i < param->validation.max_length; i++)
+    {
+        if (!isdigit((unsigned char)password[i]))
+        { // Cast to unsigned char to fix warning
+            strcpy(password, param->default_value);
+            return;
+        }
+    }
 }

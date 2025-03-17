@@ -1,0 +1,59 @@
+[1/10] Performing build step for 'bootloader'
+[1/1] cmd.exe /C "cd /D C:\projects\cursorAI\I2cKeypad\hello_world\build\bootloader\esp-idf\esptool_py && c:\esp\v521\tools\python_env\idf5.2_py3.11_env\Scripts\python.exe C:/esp/v521/idf/v5.2.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 C:/projects/cursorAI/I2cKeypad/hello_world/build/bootloader/bootloader.bin"
+Bootloader binary size 0x6860 bytes. 0x7a0 bytes (7%) free.
+[2/8] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/keyboard.c.obj
+[3/8] Linking C static library esp-idf\main\libmain.a
+[4/8] Generating ld/sections.ld
+[5/8] Linking CXX executable keypad_lcd_demo.elf
+[6/8] Generating binary image from built executable
+esptool.py v4.7.0
+Creating esp32 image...
+Merged 2 ELF sections
+Successfully created esp32 image.
+Generated C:/projects/cursorAI/I2cKeypad/hello_world/build/keypad_lcd_demo.bin
+[7/8] cmd.exe /C "cd /D C:\projects\cursorAI\I2cKeypad\hello_world\build\esp-idf\esptool_py && c:\esp\v521\tools\python_env\idf5.2_py3.11_env\Scripts\python.exe C:/esp/v521/idf/v5.2.1/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app C:/projects/cursorAI/I2cKeypad/hello_world/build/partition_table/partition-table.bin C:/projects/cursorAI/I2cKeypad/hello_world/build/keypad_lcd_demo.bin"
+keypad_lcd_demo.bin binary size 0x46850 bytes. Smallest app partition is 0x100000 bytes. 0xb97b0 bytes (72%) free.
+[7/8] cmd.exe /C "cd /D C:\esp\v521\idf\v5.2.1\esp-idf\components\esptool_py && C:\eesptool.py --chip esp32 -p com15 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 40m --flash_size 2MB 0x1000 bootloader/bootloader.bin 0x10000 keypad_lcd_demo.bin 0x8000 partition_table/partition-table.bin
+esptool.py v4.7.0
+Serial port com15
+Connecting...
+Failed to get PID of a device on com15, using standard reset sequence.
+..
+Chip is ESP32-D0WD-V3 (revision v3.1)
+Features: WiFi, BT, Dual Core, 240MHz, VRef calibration in efuse, Coding Scheme None
+Crystal is 40MHz
+MAC: 10:06:1c:f4:ee:0c
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00001000 to 0x00007fff...
+Flash will be erased from 0x00010000 to 0x00056fff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Compressed 26720 bytes to 16363...
+Writing at 0x00001000... (100 %)
+Wrote 26720 bytes (16363 compressed) at 0x00001000 in 0.5 seconds (effective 418.7 kbit/s)...
+Hash of data verified.
+Compressed 288848 bytes to 148833...
+Writing at 0x00010000... (10 %)
+Writing at 0x0001c72c... (20 %)
+Writing at 0x00024b1f... (30 %)
+Writing at 0x0002aa52... (40 %)
+Writing at 0x00030672... (50 %)
+Writing at 0x000363ad... (60 %)
+Writing at 0x00040dab... (70 %)
+Writing at 0x00049c62... (80 %)
+Writing at 0x0004f7c7... (90 %)
+Writing at 0x00055f09... (100 %)
+Wrote 288848 bytes (148833 compressed) at 0x00010000 in 3.5 seconds (effective 668.3 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 103...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (103 compressed) at 0x00008000 in 0.0 seconds (effective 1754.0 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+sp\v521\tools\tools\cmake\3.24.0\bin\cmake.exe -D IDF_PATH=C:/esp/v521/idf/v5.2.1/esp-idf -D SERIAL_TOOL=c:/esp/v521/tools/python_env/idf5.2_py3.11_env/Scripts/python.exe;;C:/esp/v521/idf/v5.2.1/esp-idf/components/esptool_py/esptool/esptool.py;--chip;esp32 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=C:/projects/cursorAI/I2cKeypad/hello_world/build -P C:/esp/v521/idf/v5.2.1/esp-idf/components/esptool_py/run_serial_tool.cmake"
