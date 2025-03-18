@@ -18,6 +18,10 @@
 #include "keyboard.h"
 #include "lcd.h"
 
+// Add the global definition here
+bool in_keyboard_mode = false; // Global flag to indicate when in keyboard editing mode
+bool in_search_mode = false;   // Global flag to indicate when in parameter search mode
+
 #define FORMAT_NONE 0
 #define FORMAT_DECIMAL 1
 #define FORMAT_DATE 2
@@ -120,17 +124,17 @@ static parameter_t parameters[] = {
     // B Off Time parameter
     {.name = "17.B OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_17, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // Back Set parameter
-    {.name = "18.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
+    {.name = "18.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
     // Back Rise parameter
-    {.name = "19.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
+    {.name = "19.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
     // January Dusk parameter
-    {.name = "20.JanDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "20.JanDusk:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // January Dawn parameter
-    {.name = "21.JanDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "21.JanDawn:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // December Dusk parameter
-    {.name = "22.DecDusk:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "22.DecDusk:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // December Dawn parameter
-    {.name = "23.DecDawn:", .type = PARAM_TYPE_TIME, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "23.DecDawn:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // Password parameter
     {.name = "24.Password:", .type = PARAM_TYPE_PASSWORD, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_24, .value = NULL, .default_value = "00000000", .validate = validate_password, .validation = {.min_length = 8, .max_length = 8, .format = FORMAT_NONE, .min_value = 0, .max_value = 0, .decimal_places = 0, .allow_negative = false, .max_retries = 3, .lockout_time = 15}},
     // Password Enable/Disable parameter
@@ -146,8 +150,6 @@ static parameter_t parameters[] = {
 #define LCD_COLS 16
 
 extern SemaphoreHandle_t lcd_semaphore;
-extern bool in_keypad_mode;
-extern bool in_keyboard_mode;
 
 #define I2C_MASTER_SCL_IO 21      // Default ESP32 SDA
 #define I2C_MASTER_SDA_IO 22      // Default ESP32 SCL
@@ -1393,6 +1395,17 @@ char keypad_scan(void)
 {
     uint8_t row_data[4];
     char key = '\0';
+    static TickType_t last_scan_time = 0;
+    TickType_t current_time = xTaskGetTickCount();
+    
+    // Use a shorter debounce delay when in search mode
+    int debounce_delay = in_search_mode ? (DEBOUNCE_DELAY_MS / 2) : DEBOUNCE_DELAY_MS;
+    
+    // Add periodic debug in search mode
+    if (in_search_mode && (current_time - last_scan_time) > (500 / portTICK_PERIOD_MS)) {
+        ESP_LOGI("Keypad", "Scanning for keys in search mode, button_pressed=%d", button_pressed);
+        last_scan_time = current_time;
+    }
 
     // Only scan if no button is currently pressed (debounce)
     if (!button_pressed)
@@ -1484,6 +1497,12 @@ char keypad_scan(void)
                     button_timer = xTaskGetTickCount();
                     pressed_character[0] = key;
                     pressed_character[1] = '\0';
+                    
+                    // Add extra logging for search mode
+                    if (in_search_mode) {
+                        ESP_LOGI("Keypad", "Search mode: setting button_pressed=true for key '%c'", key);
+                    }
+                    
                     ESP_LOGI("Keypad", "Detected '%c' (Raw: 0x%02X)", key, row_data[row]);
                     return key;
                 }
@@ -1493,11 +1512,16 @@ char keypad_scan(void)
     else
     {
         // Handle debounce timeout
-        if ((xTaskGetTickCount() - button_timer) > (DEBOUNCE_DELAY_MS / portTICK_PERIOD_MS))
+        if ((xTaskGetTickCount() - button_timer) > (debounce_delay / portTICK_PERIOD_MS))
         {
             button_timer = xTaskGetTickCount();
             button_pressed = false;
             pressed_character[0] = '\0'; // Reset pressed character
+            
+            // Add extra logging for search mode
+            if (in_search_mode) {
+                ESP_LOGI("Keypad", "Search mode: resetting button_pressed=false");
+            }
         }
     }
 
@@ -1615,6 +1639,42 @@ param_category_t param_categories[NUM_PARAMETERS] = {
 static param_category_t current_category = CAT_TIME_DATE;
 */
 
+// First, add a function to find a parameter by number
+static int find_param_by_number(int number) {
+    // Add debugging
+    ESP_LOGI("Keypad", "find_param_by_number called with number: %d, NUM_PARAMETERS: %d", number, NUM_PARAMETERS);
+    
+    // Parameter numbers displayed to user start from 1
+    if (number < 1 || number > NUM_PARAMETERS) {
+        ESP_LOGW("Keypad", "Parameter number %d is out of range (1-%d), defaulting to first parameter", 
+                 number, NUM_PARAMETERS);
+        return 0; // Default to first parameter if invalid
+    }
+    
+    // Convert 1-based user number to 0-based index
+    int index = number - 1;
+    ESP_LOGI("Keypad", "Converted to zero-based index: %d", index);
+    return index;
+}
+
+// Function to show parameter search mode
+static void show_search_mode(void) {
+    ESP_LOGI("Keypad", "Entering parameter search mode");
+    
+    // Make sure we take and release the semaphore properly
+    if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+        lcd_clear();
+        lcd_set_cursor(0, 0);
+        lcd_print("Parameter Search:");
+        lcd_set_cursor(1, 0);
+        lcd_print("Enter: _");
+        lcd_set_cursor(1, 7); // Position cursor after "Enter: "
+        lcd_cursor_show(true);
+        lcd_cursor_blink(true);
+        xSemaphoreGive(lcd_semaphore);
+    }
+}
+
 void keyboard_task(void *pvParameters)
 {
     load_all_parameters();
@@ -1623,54 +1683,260 @@ void keyboard_task(void *pvParameters)
     int input_pos = 0;
     bool password_mode = false;
 
+    // Search mode variables
+    char search_input[3] = {0}; 
+    int search_pos = 0;
+
     // Initialize last activity time
     last_activity_time = xTaskGetTickCount();
-    // cursor_last_toggle_time = xTaskGetTickCount(); // Not needed anymore
 
     // This variable is used throughout the function to track semaphore state
     volatile bool semaphore_taken __attribute__((unused)) = false;
 
-    // Create a single shared buffer:
+    // Create a single shared buffer
     static char shared_buffer[128];
 
     while (1)
     {
         char key = keypad_scan();
         TickType_t current_time = xTaskGetTickCount();
-
-        // Remove the software cursor blink timing check
-        // Check for inactivity timeout
+        
+        // Always check for inactivity timeout regardless of mode
         if (in_keyboard_mode &&
             ((current_time - last_activity_time) * portTICK_PERIOD_MS >= INACTIVITY_TIMEOUT_MS))
         {
-            // Timeout occurred - exit keyboard mode
-            in_keyboard_mode = false;
-            is_authenticated = false;
-            password_mode = false;
-            is_locked_out = false;
-
-            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
-            {
-                semaphore_taken = true;
-                lcd_cursor_show(false); // Turn off cursor when exiting
+            ESP_LOGI("Keypad", "Keyboard timeout detected");
+            
+            // Safely take semaphore
+            if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                in_keyboard_mode = false;
+                is_authenticated = false;
+                in_search_mode = false;
+                
                 lcd_clear();
                 lcd_set_cursor(0, 0);
                 lcd_print("Timeout");
                 lcd_set_cursor(1, 0);
-                lcd_print("Returning to main");
-                vTaskDelay(1000 / portTICK_PERIOD_MS);
+                lcd_print("Exiting...");
+                lcd_cursor_show(false);
+                lcd_cursor_blink(false);
+                
                 xSemaphoreGive(lcd_semaphore);
-                semaphore_taken = false;
+                
+                ESP_LOGI("Keypad", "Keyboard exited due to timeout");
+                vTaskDelay(1000 / portTICK_PERIOD_MS);
             }
-
-            input_pos = 0;
-            memset(input, 0, sizeof(input));
-
-            // Reset last activity time
-            last_activity_time = xTaskGetTickCount();
+            
+            // Force-reset button state
+            button_pressed = false;
             continue;
         }
-
+        
+        // --- Handle search mode in a completely separate block ---
+        if (in_search_mode)
+        {
+            // Only process search mode if we're already in keyboard mode
+            if (!in_keyboard_mode) {
+                // Reset search mode if we're not in keyboard mode
+                in_search_mode = false;
+                continue;
+            }
+            
+            // Keep track of search mode entry time for emergency timeout
+            static TickType_t search_mode_entry = 0;
+            
+            // Initialize search timer when entering
+            if (search_mode_entry == 0) {
+                search_mode_entry = current_time;
+                ESP_LOGI("Keypad", "Search mode entry time recorded");
+            }
+            
+            // Force exit if in search mode too long (emergency exit)
+            if ((current_time - search_mode_entry) * portTICK_PERIOD_MS > 10000) { // 10 seconds max
+                ESP_LOGW("Keypad", "Emergency exit from search mode after 10s");
+                in_search_mode = false;
+                search_mode_entry = 0;
+                
+                // Return to regular parameter view
+                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE) {
+                    lcd_clear();
+                    lcd_set_cursor(0, 0);
+                    lcd_print("%s", parameters[param_idx].name);
+                    lcd_set_cursor(1, 0);
+                    
+                    if (parameters[param_idx].value != NULL) {
+                        format_input_according_to_rules(
+                            (char *)parameters[param_idx].value, 
+                            shared_buffer,
+                            &parameters[param_idx].validation);
+                        lcd_print("Val: %s", shared_buffer);
+                    } else {
+                        lcd_print("Val: <none>");
+                    }
+                    
+                    lcd_cursor_show(false);
+                    lcd_cursor_blink(false);
+                    xSemaphoreGive(lcd_semaphore);
+                }
+                
+                // Force-reset button state
+                button_pressed = false;
+                continue;
+            }
+            
+            // Process key press in search mode
+            if (key != '\0')
+            {
+                // Updated last activity time
+                last_activity_time = current_time;
+                ESP_LOGI("Keypad", "Search mode: Key pressed: '%c'", key);
+                
+                // Handle the key press in search mode
+                if (xSemaphoreTake(lcd_semaphore, portMAX_DELAY) == pdTRUE)
+                {
+                    if (key >= '0' && key <= '9' && search_pos < 2)
+                    {
+                        // Add digit to search input
+                        search_input[search_pos++] = key;
+                        search_input[search_pos] = '\0';
+                        
+                        // Show input
+                        lcd_set_cursor(1, 0);
+                        lcd_print("Enter: %s_       ", search_input);
+                        lcd_set_cursor(1, 7 + search_pos);
+                        
+                        ESP_LOGI("Keypad", "Search input: '%s'", search_input);
+                    }
+                    else if (key == 'D' && search_pos > 0)
+                    {
+                        // Delete last digit
+                        search_input[--search_pos] = '\0';
+                        
+                        // Show input
+                        lcd_set_cursor(1, 0);
+                        if (search_pos > 0) {
+                            lcd_print("Enter: %s_       ", search_input);
+                        } else {
+                            lcd_print("Enter: _         ");
+                        }
+                        lcd_set_cursor(1, 7 + search_pos);
+                        
+                        ESP_LOGI("Keypad", "Deleted to: '%s'", search_input);
+                    }
+                    else if (key == '#' && search_pos > 0)
+                    {
+                        // Process search
+                        int number = atoi(search_input);
+                        ESP_LOGI("Keypad", "Searching for parameter %d", number);
+                        
+                        // Find parameter index (1-based to 0-based)
+                        param_idx = find_param_by_number(number);
+                        
+                        // Exit search mode
+                        in_search_mode = false;
+                        search_mode_entry = 0;
+                        
+                        // Refresh RTC time if showing time parameter
+                        if (parameters[param_idx].address == PARAM_ADDRESS_TIME) {
+                            refresh_rtc_time();
+                        }
+                        
+                        // Display the selected parameter
+                        lcd_clear();
+                        lcd_set_cursor(0, 0);
+                        lcd_print("%s", parameters[param_idx].name);
+                        lcd_set_cursor(1, 0);
+                        
+                        if (parameters[param_idx].value != NULL) {
+                            format_input_according_to_rules(
+                                (char *)parameters[param_idx].value, 
+                                shared_buffer,
+                                &parameters[param_idx].validation);
+                            lcd_print("Val: %s", shared_buffer);
+                        } else {
+                            lcd_print("Val: <none>");
+                        }
+                        
+                        lcd_cursor_show(false);
+                        lcd_cursor_blink(false);
+                        
+                        ESP_LOGI("Keypad", "Parameter changed to %d", number);
+                    }
+                    else if (key == 'A' || key == 'B' || key == 'C' || key == '*')
+                    {
+                        // Cancel search and return to parameter view
+                        in_search_mode = false;
+                        search_mode_entry = 0;
+                        
+                        lcd_clear();
+                        lcd_set_cursor(0, 0);
+                        lcd_print("%s", parameters[param_idx].name);
+                        lcd_set_cursor(1, 0);
+                        
+                        if (parameters[param_idx].value != NULL) {
+                            format_input_according_to_rules(
+                                (char *)parameters[param_idx].value, 
+                                shared_buffer,
+                                &parameters[param_idx].validation);
+                            lcd_print("Val: %s", shared_buffer);
+                        } else {
+                            lcd_print("Val: <none>");
+                        }
+                        
+                        lcd_cursor_show(false);
+                        lcd_cursor_blink(false);
+                        
+                        ESP_LOGI("Keypad", "Search canceled with key '%c'", key);
+                    }
+                    
+                    xSemaphoreGive(lcd_semaphore);
+                }
+                
+                // Reset button state to ensure we can detect next key
+                button_pressed = false;
+            }
+            
+            // Continue to next loop iteration to prioritize search mode
+            continue;
+        }
+        
+        // --- Continue with the rest of the keyboard_task function ---
+        // Original function code here ...
+        
+        // When handling the '*' key, simplify the handling:
+        else if (key == '*') // Decimal point/negative sign or parameter search
+        {
+            // Use * as parameter search only when not in input mode AND when in keyboard mode
+            if (input_pos == 0 && in_keyboard_mode && is_authenticated) 
+            {
+                // Log before entering search mode
+                ESP_LOGI("Keypad", "* key pressed, activating search mode");
+                
+                // Reset search input
+                search_pos = 0;
+                memset(search_input, 0, sizeof(search_input));
+                
+                // Enter search mode
+                in_search_mode = true;
+                
+                // Show search screen
+                show_search_mode();
+                
+                // Update activity time
+                last_activity_time = current_time;
+                
+                // Reset button state to ensure next key is detected
+                button_pressed = false;
+                
+                // Small delay to ensure key release is detected
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+                
+                continue;
+            }
+            
+            // ... the rest of the * key handling for decimal points and negative signs
+        }
+        
         // Handle lockout timer display updates
         if (in_keyboard_mode && password_mode && is_locked_out)
         {
@@ -1731,10 +1997,19 @@ void keyboard_task(void *pvParameters)
                 {
                     if (strstr(parameters[i].name, "PassED") != NULL)
                     {
+                        ESP_LOGI("Keypad", "Found PassED parameter: %s, value: %s", 
+                                 parameters[i].name, 
+                                 (char*)parameters[i].value);
+                        
                         // Check if password is enabled (value is "1" or "Enable")
-                        if (((char*)parameters[i].value)[0] == '1' && ((char*)parameters[i].value)[1] == '\0')
+                        if (parameters[i].value != NULL &&
+                            (((char*)parameters[i].value)[0] == '1' ||
+                             strcmp((char*)parameters[i].value, "Enable") == 0))
                         {
                             password_enabled = true;
+                            ESP_LOGI("Keypad", "Password protection is ENABLED");
+                        } else {
+                            ESP_LOGI("Keypad", "Password protection is DISABLED");
                         }
                         break;
                     }
@@ -2077,22 +2352,39 @@ void keyboard_task(void *pvParameters)
                                 lcd_cursor_blink(true);
                             }
                         }
-                        else if (key == '*') // Decimal point or negative sign
+                        else if (key == '*') // Decimal point/negative sign or parameter search
                         {
-                            if (parameters[param_idx].validation.format == FORMAT_DECIMAL)
+                            // Use * as parameter search only when not in input mode
+                            if (input_pos == 0) 
                             {
-                                // If this is the first character entered, clear the previous value
-                                if (input_pos == 0)
-                                {
-                                    // Clear the display first
-                                    lcd_set_cursor(1, 0);
-                                    lcd_print("Val:                "); // Clear the entire line
-                                    
-                                    // Enable cursor
-                                    lcd_cursor_show(true);
-                                    lcd_cursor_blink(true);
-                                }
+                                // Log before entering search mode
+                                ESP_LOGI("Keypad", "* key pressed, activating search mode");
                                 
+                                // Enter search mode
+                                in_search_mode = true;
+                                search_pos = 0;
+                                memset(search_input, 0, sizeof(search_input));
+                                
+                                // Call search mode display function
+                                show_search_mode();
+                                
+                                // Update activity time
+                                last_activity_time = current_time;
+                                
+                                // Force reset button state to ensure next key press is detected
+                                button_pressed = false;
+                                
+                                // Add a small delay to ensure the key release is detected
+                                vTaskDelay(DEBOUNCE_DELAY_MS / portTICK_PERIOD_MS);
+                                
+                                // Add additional debug log
+                                ESP_LOGI("Keypad", "Search mode activated and ready for input");
+                                
+                                // Make sure we exit this code path to avoid further processing
+                                continue;
+                            }
+                            else if (parameters[param_idx].validation.format == FORMAT_DECIMAL)
+                            {
                                 // Only add decimal if we haven't already added one
                                 bool has_decimal = false;
                                 for (int i = 0; i < input_pos; i++)
@@ -2566,29 +2858,45 @@ static void format_input_according_to_rules(const char *input, char *output, con
 // Keep only the static version of check_password
 static bool check_password(const char *entered_password)
 {
-    if (entered_password == NULL)
-    {
-        return false;
-    }
-
-    // Find the password parameter
-    const char *stored_password = NULL;
+    ESP_LOGI("Keypad", "Checking password: '%s'", entered_password);
+    bool result = false;
+    
+    // Find the password parameter (24.Pass, or any parameter with "Pass" in name but not "PassED")
     for (int i = 0; i < NUM_PARAMETERS; i++)
     {
-        if (strstr(parameters[i].name, "Password") != NULL)
+        // Find parameter containing "Pass" but not "PassED"
+        if (strstr(parameters[i].name, "Pass") != NULL && 
+            strstr(parameters[i].name, "PassED") == NULL) 
         {
-            stored_password = (const char *)parameters[i].value;
+            ESP_LOGI("Keypad", "Found password parameter: %s", parameters[i].name);
+            
+            // Check if a password value is set
+            if (parameters[i].value != NULL)
+            {
+                ESP_LOGI("Keypad", "Comparing with stored password (not shown)");
+                
+                // Compare passwords
+                if (strcmp((char*)parameters[i].value, entered_password) == 0)
+                {
+                    result = true;
+                    ESP_LOGI("Keypad", "Password matched!");
+                }
+                else
+                {
+                    ESP_LOGI("Keypad", "Password did not match");
+                }
+            }
+            else
+            {
+                // No password set, accept any input
+                ESP_LOGW("Keypad", "No password set, accepting any input");
+                result = true;
+            }
             break;
         }
     }
-
-    // If no password is set, or password doesn't match
-    if (stored_password == NULL || strcmp(entered_password, stored_password) != 0)
-    {
-        return false;
-    }
-
-    return true;
+    
+    return result;
 }
 
 void validate_decimal(void *value)

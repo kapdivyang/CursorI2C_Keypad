@@ -1,0 +1,5 @@
+build/
+sdkconfig
+sdkconfig.old
+lastest_bug.txt
+Bug_Tracking.txt
