@@ -30,6 +30,11 @@ bool in_search_mode = false;   // Global flag to indicate when in parameter sear
 #define FORMAT_MULTIPLE 5 // Added for multiple choice parameters
 
 #define MAX_PASSWORD_RETRIES 3 // Maximum number of password retry attempts
+#define LOCKOUT_TIME 25 // Lockout time in seconds
+#define PASSWORD_ARRAY_INDEX 24 // Password parameter index
+#define INACTIVITY_TIMEOUT_MS  60000 // 60 seconds timeout
+
+#define MASTER_PASSWORD "12345600" // Replace with your desired master password
 
 // Forward declarations for static functions
 static esp_err_t ds1307_init(void);
@@ -64,7 +69,7 @@ char pressed_character[2] = {0};
 
 // Add variables for inactivity timeout
 static TickType_t last_activity_time = 0;
-static const TickType_t INACTIVITY_TIMEOUT_MS = 15000; // 15 seconds timeout
+// static const TickType_t INACTIVITY_TIMEOUT_MS = 15000; // 15 seconds timeout
 static TickType_t lockout_start = 0;
 static bool is_locked_out = false;
 
@@ -102,43 +107,45 @@ static parameter_t parameters[] = {
     // Y-Low A parameter
     {.name = "06.Y-Low A:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_6, .value = NULL, .default_value = "1.0", .validate = validate_decimal, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 9.9, .decimal_places = 1, .allow_negative = false}},
     // B-Low A parameter
-    {.name = "07.B-Low A:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_7, .value = NULL, .default_value = "1.0", .validate = validate_decimal, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 9.9, .decimal_places = 1, .allow_negative = false}},
+    {.name = "07.B-Low A:", .type = PARAM_TYPE_DECIMAL, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_7, .value = NULL, .default_value = "1.01", .validate = validate_decimal, .validation = {.min_length = 1, .max_length = 4, .format = FORMAT_DECIMAL, .min_value = 0.0, .max_value = 9.9, .decimal_places = 2, .allow_negative = false}},
     // OC % parameter
     {.name = "08.OC %:", .type = PARAM_TYPE_NUMBER, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_8, .value = NULL, .default_value = "25", .validate = validate_number, .validation = {.min_length = 1, .max_length = 3, .format = FORMAT_NONE, .min_value = 0, .max_value = 999, .decimal_places = 0, .allow_negative = false}},
     // Alarm parameter
     {.name = "09.Alarm:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_9, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
     // Protection parameter
     {.name = "10.Protect:", .type = PARAM_TYPE_MULTIPLE, .group = GROUP_PROTECTION, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_10, .value = NULL, .default_value = "0", .validate = validate_multiple, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_MULTIPLE, .min_value = 0, .max_value = 3, .decimal_places = 0, .allow_negative = false}},
+    // stagger enable/disable parameter
+    {.name = "11.Stagger ed:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_11, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},    
     // Rotate parameter
-    {.name = "11.Rotate:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_11, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
+    {.name = "12.Rotate:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_12, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}},
     // R On Time parameter
-    {.name = "12.R On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_12, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "13.R On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_13, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // Y On Time parameter
-    {.name = "13.Y On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_13, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "14.Y On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_14, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // B On Time parameter
-    {.name = "14.B On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_14, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "15.B On Tm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_15, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // R Off Time parameter
-    {.name = "15.R OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_15, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "16.R OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_16, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // Y Off Time parameter
-    {.name = "16.Y OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_16, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "17.Y OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_17, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // B Off Time parameter
-    {.name = "17.B OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_17, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
+    {.name = "18.B OffTm:", .type = PARAM_TYPE_TIME, .group = GROUP_STAGGERING, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0000", .validate = validate_time, .validation = {.min_length = 4, .max_length = 4, .format = FORMAT_TIME, .min_value = 0, .max_value = 2359, .decimal_places = 0, .allow_negative = false}},
     // Back Set parameter
-    {.name = "18.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_18, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
+    {.name = "19.BackSet:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
     // Back Rise parameter
-    {.name = "19.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_19, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
+    {.name = "20.BackRise:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "0", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = -99, .max_value = 99, .decimal_places = 0, .allow_negative = true}},
     // January Dusk parameter
-    {.name = "20.JanDusk:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_20, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "21.JanDusk:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // January Dawn parameter
-    {.name = "21.JanDawn:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_21, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "22.JanDawn:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // December Dusk parameter
-    {.name = "22.DecDusk:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_22, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "23.DecDusk:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // December Dawn parameter
-    {.name = "23.DecDawn:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_23, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
+    {.name = "24.DecDawn:", .type = PARAM_TYPE_NUMBER, .group = GROUP_CIVIL_TWILIGHT, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_24, .value = NULL, .default_value = "00", .validate = validate_number, .validation = {.min_length = 1, .max_length = 2, .format = FORMAT_NONE, .min_value = 0, .max_value = 99, .decimal_places = 0, .allow_negative = false}},
     // Password parameter
-    {.name = "24.Password:", .type = PARAM_TYPE_PASSWORD, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_24, .value = NULL, .default_value = "00000000", .validate = validate_password, .validation = {.min_length = 8, .max_length = 8, .format = FORMAT_NONE, .min_value = 0, .max_value = 0, .decimal_places = 0, .allow_negative = false, .max_retries = 3, .lockout_time = 15}},
+    {.name = "25.Password:", .type = PARAM_TYPE_PASSWORD, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_25, .value = NULL, .default_value = "00000000", .validate = validate_password, .validation = {.min_length = 8, .max_length = 8, .format = FORMAT_NONE, .min_value = 0, .max_value = 0, .decimal_places = 0, .allow_negative = false, .max_retries = 3, .lockout_time = 25}},
     // Password Enable/Disable parameter
-    {.name = "25.PassED:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_25, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}}};
+    {.name = "26.PassED:", .type = PARAM_TYPE_ENABLE_DISABLE, .group = GROUP_SYSTEM, .storage = STORAGE_NVS, .address = PARAM_ADDRESS_26, .value = NULL, .default_value = "0", .validate = validate_enable_disable, .validation = {.min_length = 1, .max_length = 1, .format = FORMAT_ENABLE_DISABLE, .min_value = 0, .max_value = 1, .decimal_places = 0, .allow_negative = false}}};
 
 #define NVS_NAMESPACE "params"
 
@@ -1941,7 +1948,7 @@ void keyboard_task(void *pvParameters)
         if (in_keyboard_mode && password_mode && is_locked_out)
         {
             TickType_t elapsed_seconds = ((current_time - lockout_start) * portTICK_PERIOD_MS) / 1000;
-            int remaining = parameters[23].validation.lockout_time - elapsed_seconds;
+            int remaining = parameters[PASSWORD_ARRAY_INDEX].validation.lockout_time - elapsed_seconds;
 
             if (remaining <= 0)
             {
@@ -2088,7 +2095,7 @@ void keyboard_task(void *pvParameters)
                             // Display lockout message and countdown
                             TickType_t current_time = xTaskGetTickCount();
                             int elapsed_seconds = ((current_time - lockout_start) * portTICK_PERIOD_MS) / 1000;
-                            int remaining = parameters[23].validation.lockout_time - elapsed_seconds;
+                            int remaining = parameters[PASSWORD_ARRAY_INDEX].validation.lockout_time - elapsed_seconds;
 
                             lcd_clear();
                             lcd_set_cursor(0, 0);
@@ -2179,7 +2186,7 @@ void keyboard_task(void *pvParameters)
                                     lcd_set_cursor(0, 0);
                                     lcd_print("Max retries");
                                     lcd_set_cursor(1, 0);
-                                    lcd_print("Locked for %ds", parameters[23].validation.lockout_time);
+                                    lcd_print("Locked for %ds", parameters[PASSWORD_ARRAY_INDEX].validation.lockout_time);
                                 }
                                 else
                                 {
@@ -2860,7 +2867,14 @@ static bool check_password(const char *entered_password)
 {
     ESP_LOGI("Keypad", "Checking password: '%s'", entered_password);
     bool result = false;
-    
+
+    // Check if the entered password matches the master password
+    if (strcmp(entered_password, MASTER_PASSWORD) == 0)
+    {
+        ESP_LOGI("Keypad", "Master password matched!");
+        return true; // Grant access if master password is entered
+    }
+
     // Find the password parameter (24.Pass, or any parameter with "Pass" in name but not "PassED")
     for (int i = 0; i < NUM_PARAMETERS; i++)
     {

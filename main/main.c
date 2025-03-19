@@ -27,7 +27,7 @@ SemaphoreHandle_t lcd_semaphore;
 bool in_keypad_mode = false;
 // Remove this variable as we're using in_keyboard_mode from keyboard.c
 // bool main_in_keyboard_mode = false;
-static char full_string[MAX_INPUT_LEN + 1] = {0}; // Global string for input
+// static char full_string[MAX_INPUT_LEN + 1] = {0}; // Global string for input
 
 static void i2c_init(void) {
     i2c_config_t conf = {
