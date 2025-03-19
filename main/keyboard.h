@@ -84,6 +84,28 @@ typedef enum {
 #define PARAM_ADDRESS_24 24
 #define PARAM_ADDRESS_25 25
 #define PARAM_ADDRESS_26 26
+#define PARAM_ADDRESS_27 27
+#define PARAM_ADDRESS_28 28
+#define PARAM_ADDRESS_29 29
+#define PARAM_ADDRESS_30 30
+#define PARAM_ADDRESS_31 31
+#define PARAM_ADDRESS_32 32
+#define PARAM_ADDRESS_33 33
+#define PARAM_ADDRESS_34 34
+#define PARAM_ADDRESS_35 35
+#define PARAM_ADDRESS_36 36
+#define PARAM_ADDRESS_37 37
+#define PARAM_ADDRESS_38 38
+#define PARAM_ADDRESS_39 39
+#define PARAM_ADDRESS_40 40
+#define PARAM_ADDRESS_41 41
+#define PARAM_ADDRESS_42 42
+#define PARAM_ADDRESS_43 43
+#define PARAM_ADDRESS_44 44
+#define PARAM_ADDRESS_45 45
+#define PARAM_ADDRESS_46 46
+#define PARAM_ADDRESS_47 47
+#define PARAM_ADDRESS_48 48
 
 // Format validation rules
 typedef struct {
@@ -112,7 +134,7 @@ typedef struct {
 } parameter_t;
 
 // Add these before the function prototypes
-#define NUM_PARAMETERS 26
+#define NUM_PARAMETERS 46
 #define NVS_NAMESPACE "params"
 
 // Function prototypes
